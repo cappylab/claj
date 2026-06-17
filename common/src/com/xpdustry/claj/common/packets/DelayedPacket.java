@@ -25,33 +25,36 @@ import arc.util.Threads;
 import arc.util.io.ByteBufferInput;
 import arc.util.io.ByteBufferOutput;
 
+import com.xpdustry.claj.common.util.ByteBufferPool;
+
 
 /**
  * Bufferize the data in {@link #READ} at {@link #read(ByteBufferInput)} call. <br>
  * Real reading will be done at {@link #handled()} call.
  */
 public abstract class DelayedPacket implements Packet {
-  private static final byte[] NODATA = {};
-  private static final ThreadLocal<ByteBufferInput> READ =
-    Threads.local(() -> new ByteBufferInput(ByteBuffer.wrap(NODATA)));
+  private static final ByteBuffer EMPTY = ByteBuffer.allocate(0);
+  private static final ThreadLocal<ByteBufferInput> READ = Threads.local(() -> new ByteBufferInput(EMPTY));
 
-  private byte[] DATA = NODATA;
+  private ByteBuffer DATA = EMPTY;
 
   @Override
   public final void read(ByteBufferInput read) {
-    DATA = new byte[read.buffer.remaining()];
-    read.readFully(DATA);
+    DATA = ByteBufferPool.get().obtain(read.buffer.remaining());
+    DATA.put(read.buffer).flip();
   }
 
   @Override
   public final void handled() {
-    if (DATA == NODATA) return; // avoid double reading
+    if (DATA == EMPTY) return; // avoid double reading
     ByteBufferInput read = READ.get();
-    if (read.buffer.capacity() < DATA.length)
-      read.buffer = ByteBuffer.allocate(DATA.length);
-    ((ByteBuffer)read.buffer.clear()).put(DATA).flip();
-    readImpl(read);
-    DATA = NODATA;
+    try {
+      read.buffer = DATA;
+      readImpl(read);
+    } finally {
+      ByteBufferPool.get().release(DATA);
+      read.buffer = DATA = EMPTY;
+    }
   }
 
   protected abstract void readImpl(ByteBufferInput read);

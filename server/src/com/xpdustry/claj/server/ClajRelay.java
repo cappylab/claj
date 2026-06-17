@@ -38,6 +38,7 @@ import com.xpdustry.claj.common.net.stream.*;
 import com.xpdustry.claj.common.packets.*;
 import com.xpdustry.claj.common.status.*;
 import com.xpdustry.claj.common.util.AddressUtil;
+import com.xpdustry.claj.common.util.ByteBufferPool;
 import com.xpdustry.claj.common.util.Strings;
 import com.xpdustry.claj.server.ClajEvents.*;
 import com.xpdustry.claj.server.util.NetworkSpeed;
@@ -83,6 +84,9 @@ public class ClajRelay extends Server implements ApplicationListener {
     receiver = new ServerReceiver(this, Core.app::post);
     routines = new ClajRoutines();
 
+    // Preload first bucket of buffer pool
+    ByteBufferPool.get().fill(1);
+
     setDiscoveryHandler((_, r) -> {
       if (versionBuff == null)
         versionBuff = ByteBuffer.allocate(5).put(ClajNet.id).putInt(ClajVars.version.majorVersion);
@@ -113,7 +117,7 @@ public class ClajRelay extends Server implements ApplicationListener {
 
     receiver.handle(ConnectionClosedPacket.class, (c, p) -> onConClose(toClajCon(c), p.conID, p.reason));
     //TODO: keep these two on the network thread for optimization?
-    receiver.handle(ConnectionPacketWrapPacket.class, (c, p) -> onHostPacket(toClajCon(c), p));
+    receiver.handle(ConnectionPayloadPacket.class, (c, p) -> onHostPacket(toClajCon(c), p));
     receiver.handle(RawPacket.class, (c, p) -> onConPacket(toClajCon(c), p));
   }
 
@@ -125,7 +129,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   // end region
   // region events
 
-  /** Will also prepare the connection if valid. */
+  /** Will also prepare the connection if valid. Note: called on network thread. */
   public boolean isConnectAllowed(Connection connection) {
     if (connection == null) return false;
     String id = AddressUtil.encodeId(connection);
@@ -148,7 +152,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     return true;
   }
 
-  /** Weird name =/ */
+  /** Weird name =/. Note: called on network thread. */
   @SuppressWarnings("null")
   public boolean isDisconnectAllowed(Connection connection, DcReason reason) {
     if (connection == null) return false;
@@ -157,17 +161,22 @@ public class ClajRelay extends Server implements ApplicationListener {
     String id = valid ? con.sid : AddressUtil.encodeId(connection);
     String ip = valid ? con.saddress : AddressUtil.getString(connection);
     Log.debug("Connection @ (@) lost: @.", id, ip, reason);
+
+    // Reset streams if needed
     if (StreamReceiver.has(connection))
       Core.app.post(() -> StreamReceiver.reset(connection));
-    // Because speed is calculated between calls, if there is no traffic, the values remains stuck at last update
+
+    // Because speed is calculated at reception, if there is no traffic, the values remains stuck at last update
     if (networkSpeed != null) {
       networkSpeed.uploadMark(0);
       networkSpeed.downloadMark(0);
     }
+
     // Avoid searching for a room if it was an invalid connection or just a ping
     return valid;
   }
 
+  /** Note: called on network thread. */
   public boolean isReceiveAllowed(Connection connection, Object object) {
     ClajConnection con = toClajCon(connection);
     if (con == null) return false;
@@ -189,8 +198,9 @@ public class ClajRelay extends Server implements ApplicationListener {
     if (connection == null) return;
     Events.fire(new ClientDisonnectedEvent(connection, reason));
     connections.remove(connection.id);
+    removeQueue(connection);
 
-    ClajRoom room = connection.room;
+    ClajRoom room = connection.currentRoom();
     if (removeClient(connection, reason)){
       info("Room @ closed because connection @ (the host) has disconnected.", room.sid, connection.sid);
     } else if (room != null) {
@@ -200,7 +210,8 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   public void onIdle(ClajConnection connection) {
     if (connection == null) return;
-    if (connection.room != null) connection.room.idle(connection);
+    ClajRoom room = connection.currentRoom();
+    if (room != null) room.idle(connection);
     // No event for that, this is received to many times
   }
 
@@ -238,7 +249,7 @@ public class ClajRelay extends Server implements ApplicationListener {
       return CloseReason.closed;
     }
 
-    ClajRoom room = connection.room;
+    ClajRoom room = connection.currentRoom();
     // Ignore if the connection is already in a room or hold one
     if (room != null) {
       denyAction(connection, room, MessageType.alreadyHosting);
@@ -259,7 +270,7 @@ public class ClajRelay extends Server implements ApplicationListener {
         "Connection @ tried to close the room @ but is not the host."
     )) return false;
 
-    ClajRoom room = connection.room;
+    ClajRoom room = connection.currentRoom();
     closeRoom(room);
     info("Room @ closed by connection @ (the host).", room.sid, connection.sid);
     return true;
@@ -269,7 +280,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   public RejectReason onRoomJoin(ClajConnection connection, boolean isRequest, long roomId, ClajType type,
                                  boolean withPassword, short password) {
     if (connection == null) return RejectReason.error;
-    ClajRoom room = connection.room;
+    ClajRoom room = connection.currentRoom();
 
     // Disconnect from a potential another room.
     if (room != null) {
@@ -354,7 +365,7 @@ public class ClajRelay extends Server implements ApplicationListener {
         "Connection @ tried to configure the room @ but is not the host."
     )) return false;
 
-    ClajRoom room = connection.room;
+    ClajRoom room = connection.currentRoom();
     setRoomConfiguration(room, isPublic, isProtected, password, requestState, maxClients);
     info("Connection @ (the host) changed configuration of room @.", connection.sid, room.sid);
     return true;
@@ -368,8 +379,7 @@ public class ClajRelay extends Server implements ApplicationListener {
         "Connection @ tried to set state of room @ but is not the host."
     )) return false;
 
-    ClajRoom room = connection.room;
-
+    ClajRoom room = connection.currentRoom();
     int limit = ClajConfig.stateLimit.get();
     if (limit > 0 && !room.stateRate.allow(60000L, limit)) {
       warn("Connection @ (the host) tried to change state of room @ but was rate limited.", connection.sid,
@@ -402,12 +412,14 @@ public class ClajRelay extends Server implements ApplicationListener {
       return false;
     } else if (room.shouldRequestState() && room.isStateOutdated()) {
       requestRoomState(connection, room);
-      info("Connection @ requested state of room @ but current one is " +
-           (room.requestingState ? "in progress" : "outdated."), connection.sid, room.sid);
+      String msg = "Connection @ requested state of room @ but current one is " +
+                   (room.requestingState ? "updating" : "outdated.");
+      if (room.requestingState) Log.debug(msg, connection.sid, room.sid);
+      else info(msg, connection.sid, room.sid);
       return false;
     } else {
       room.sendRoomState(connection);
-      info("Connection @ requested state of room @.", connection.sid, room.sid); //TODO: maybe debug
+      Log.debug("Connection @ requested state of room @.", connection.sid, room.sid);
       return true;
     }
   }
@@ -422,14 +434,13 @@ public class ClajRelay extends Server implements ApplicationListener {
       return false;
     }
 
-    //TODO: maybe debug?
     switch (requestRoomList(connection, type)) {
       case 0 ->
         info("Connection @ requested room list of type @ but the current one is oudated.", connection.sid, type);
       case 1 ->
-        info("Connection @ requested room list of type @.", connection.sid, type);
+        Log.debug("Connection @ requested room list of type @.", connection.sid, type);
       case 2 ->
-        info("Connection @ requested room list of type @ but the current one is not finished.", connection.sid, type);
+        Log.debug("Connection @ requested room list of type @ but the current one is not finished.", connection.sid, type);
       case 3 ->
         warn("Connection @ requested room list of type @ but the request limit is reached.", connection.sid, type);
       case 4 -> {
@@ -454,7 +465,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     )) return false;
 
     ClajConnection target = connections.get(conId);
-    ClajRoom room = connection.room;
+    ClajRoom room = connection.currentRoom();
 
     // Ignore when trying to close itself or one that not in the same room
     if (target == null || target == connection || !room.contains(target)) {
@@ -471,9 +482,9 @@ public class ClajRelay extends Server implements ApplicationListener {
     return true;
   }
 
-  public boolean onHostPacket(ClajConnection connection, ConnectionPacketWrapPacket packet) {
+  public boolean onHostPacket(ClajConnection connection, ConnectionPayloadPacket packet) {
     if (connection == null) return false;
-    ClajRoom room = connection.room;
+    ClajRoom room = connection.currentRoom();
     if (room == null) return false;
     room.received(connection, packet);
     return true;
@@ -481,7 +492,8 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   public void onConPacket(ClajConnection connection, RawPacket packet) {
     if (connection == null) return;
-    else if (connection.room != null) connection.room.received(connection, packet);
+    ClajRoom room = connection.currentRoom();
+    if (room != null) room.received(connection, packet);
     else addQueue(connection, packet);
   }
 
@@ -575,6 +587,11 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   public void closeRooms() { closeRooms(CloseReason.serverClosed); }
   public void closeRooms(CloseReason reason) {
+    for (RawPacket[] queue : packetQueue.values()) {
+      for (RawPacket element : queue) {
+        if (element != null) element.free();
+      }
+    }
     packetQueue.clear();
     routines.clearCaches((c, r) -> rejectRoomInfo(c, getRoom(r), false));
     rooms.eachValue(r -> r.close(reason));
@@ -600,7 +617,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   public void closeRoom(ClajRoom room) { closeRoom(room, null); }
   public void closeRoom(ClajRoom room, CloseReason reason) { closeRoom(room, reason, true); }
   protected void closeRoom(ClajRoom room, CloseReason reason, boolean removeFromTypes) {
-    for (ClajConnection c : room.clients.values()) removeQueue(c);
+    if (room == null) return;
     clientsInRooms -= room.clients.size + 1;
     rooms.remove(room.id);
 
@@ -641,7 +658,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   }
 
   public void addClient(ClajRoom room, ClajConnection con) {
-    if (con == null) return;
+    if (con == null || room == null) return;
     room.connected(con);
     routines.cancelRoomAfk(room);
     clientsInRooms++;
@@ -650,9 +667,8 @@ public class ClajRelay extends Server implements ApplicationListener {
   /** @return whether client was the host. If so the room will be closed. */
   public boolean removeClient(ClajConnection con, DcReason reason) {
     if (con == null) return false;
-    removeQueue(con);
     routines.clearClientCache(con);
-    ClajRoom room = con.room;
+    ClajRoom room = con.currentRoom();
     if (room != null) {
       room.disconnected(con, reason);
       // Close the room if it was the host
@@ -730,6 +746,7 @@ public class ClajRelay extends Server implements ApplicationListener {
 
 
   public void denyAction(ClajConnection con, ClajRoom room, MessageType type) {
+    if (con == null || room == null) return;
     room.message(type);
     Events.fire(new ActionDeniedEvent(con, room, type));
   }
@@ -739,7 +756,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   }
   protected boolean checkRoomHost(ClajConnection con, MessageType errType, String errMsg, Object extra) {
     if (con == null) return true;
-    ClajRoom room = con.room;
+    ClajRoom room = con.currentRoom();
     if (room == null) return true;
     if (room.isHost(con)) return false;
     denyAction(con, room, errType);
@@ -749,15 +766,16 @@ public class ClajRelay extends Server implements ApplicationListener {
   }
 
   /**
-   * Simple packet spam protection.
+   * Simple packet spam protection. Note: called on network thread.
    * @return whether the packet is allowed or not. If not, the client will be kicked and the room warned.
    */
   public boolean checkRateLimit(ClajConnection con) {
     if (con == null) return true;
-    int limit = con.isRoomHost() ? ClajConfig.hostSpamLimit.get() * con.room.clients.size : ClajConfig.spamLimit.get();
+    ClajRoom room = con.currentRoom();
+    int limit = con.isRoomHost() ? ClajConfig.hostSpamLimit.get() * room.clients.size : ClajConfig.spamLimit.get();
     boolean isRated = limit > 0 && !con.packetRate.allow(3000L, limit);
     if (isRated) {
-      if (con.isRoomHost()) rejectRateLimitedHost(con.room);
+      if (con.isRoomHost()) rejectRateLimitedHost(room);
       else rejectRateLimitedClient(con);
     }
     return !isRated;
@@ -768,10 +786,10 @@ public class ClajRelay extends Server implements ApplicationListener {
   }
   /** @return whether a slot was found or not. */
   public boolean addQueue(Connection con, RawPacket packet) {
-    if (packet.data.remaining() >= packetSizeInQueue) {
+    if (packet.data().remaining() >= packetSizeInQueue) {
       removeQueue(con);
       con.close(DcReason.error);
-      Log.debug("Connection @ kicked for sending too big packets in the queue.", AddressUtil.encodeId(con));
+      Log.warn("Connection @ kicked for sending too big packets in the queue.", AddressUtil.encodeId(con));
       return false;
     }
 
@@ -787,12 +805,17 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   /** @return whether a queue was removed or not. */
   public boolean removeQueue(ClajConnection con) {
-    return packetQueue.remove(con.id) != null;
+    return removeQueue(con.connection);
   }
 
   /** @return whether a queue was removed or not. */
   public boolean removeQueue(Connection con) {
-    return packetQueue.remove(con.getID()) != null;
+    RawPacket[] queue = packetQueue.remove(con.getID());
+    if (queue == null) return false;
+    for (RawPacket element : queue) {
+      if (element != null) element.free();
+    }
+    return true;
   }
 
   /** @return whether the queue has been send to the room host, or not (because no packet was queued). */
@@ -813,6 +836,7 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   /** As this is mainly called from network thread, it will be posted to the main thread. */
   public void rejectObsoleteClient(ClajConnection connection) {
+    if (connection == null) return;
     if (ClajConfig.warnDeprecated.get()) {
       connection.send("[scarlet][[CLaJ Server]:[] Your CLaJ version is obsolete! "
                     + "Please upgrade it by installing the 'claj' mod, in the mod browser.");
@@ -826,9 +850,11 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   /** As this is mainly called from network thread, it will be posted to the main thread. */
   public void rejectRateLimitedClient(ClajConnection connection) {
-    ClajRoom room = connection.room;
+    if (connection == null) return;
+    ClajRoom room = connection.currentRoom();
     connection.close(); // close now, event will be discarded if received twice
     Core.app.post(() -> {
+      //check?
       if (room != null) {
         room.message(MessageType.packetSpamming);
         room.disconnected(connection, DcReason.closed);
@@ -844,6 +870,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     // We cannot close the room now, so just kick everyone to be safe and close after
     for (ClajConnection c : room.clients.values()) c.close();
     Core.app.post(() -> {
+      if (room.isClosed()) return;
       closeRoom(room, CloseReason.spam);
       warn("Room @ closed for packet spamming.", room.sid);
       Events.fire(new HostKickedEvent(room));
@@ -851,6 +878,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   }
 
   public void rejectRoomCreation(ClajConnection connection, CloseReason reason) {
+    if (connection == null) return;
     RoomClosedPacket p = new RoomClosedPacket();
     p.reason = reason;
     connection.send(p);
@@ -862,6 +890,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     rejectRoomJoin(connection, room, room.id, reason);
   }
   protected void rejectRoomJoin(ClajConnection connection, ClajRoom room, long roomId, RejectReason reason) {
+    if (connection == null) return;
     RoomJoinDeniedPacket p = new RoomJoinDeniedPacket();
     p.roomId = room == null ? roomId : room.id;
     p.reason = reason;
@@ -871,6 +900,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   }
 
   public void acceptJoinRequest(ClajConnection connection, ClajRoom room) {
+    if (connection == null) return;
     RoomJoinAcceptedPacket p = new RoomJoinAcceptedPacket();
     p.roomId = room.id;
     connection.send(p);
@@ -878,12 +908,14 @@ public class ClajRelay extends Server implements ApplicationListener {
   }
 
   public void rejectRoomInfo(ClajConnection connection, ClajRoom room, boolean rateLimited) {
+    if (connection == null) return;
     connection.send(RoomInfoDeniedPacket.instance);
     Events.fire(new RoomInfoRejectedEvent(connection, room, rateLimited));
     connection.close();
   }
 
   public void rejectRoomList(ClajConnection connection, ClajType type, boolean rateLimited) {
+    if (connection == null) return;
     connection.send(emptyList);
     Events.fire(new RoomListRejectedEvent(connection, type, rateLimited));
     //connection.close(); // closing can be handled as rejected
@@ -900,7 +932,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     long id;
     /* re-roll if 0 because it's used to specify an uncreated room. */
     do { id = Mathf.rand.nextLong(); }
-    while (id == 0 || rooms.containsKey(id));
+    while (id == ClajRoom.UNCREATED_ROOM || rooms.containsKey(id));
     return id;
   }
 
@@ -914,6 +946,7 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   /** Try to find a room using the base64 encoded id. */
   public ClajRoom getRoom(String encodedRoomId) {
+    if (encodedRoomId == null) return null;
     try { return getRoom(Strings.base64ToLong(encodedRoomId)); }
     catch (Exception _) { return null; }
   }

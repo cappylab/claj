@@ -308,11 +308,9 @@ public class CreateRoomDialog extends BaseDialog {
     }, c -> {
       Vars.ui.loadfrag.hide();
       t.cancel();
-      if (c == null) {
-        link = null;
-        return;
-      }
       switch (c) {
+        case null:
+          break;
         case error, closed:
           if (link == null) {
             Vars.ui.showErrorMessage("@claj.manage.room-creation-failed");

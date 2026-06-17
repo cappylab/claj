@@ -36,17 +36,18 @@ import com.xpdustry.claj.server.util.NetworkSpeed;
 
 
 public class ClajServerSerializer implements NetSerializer, FrameworkSerializer {
+  public static boolean POOLED_RAW_PACKETS = true; //final?
+
   static {
     // Set wrapper serializer
-    ConnectionPacketWrapPacket.serializer = new ConnectionPacketWrapPacket.Serializer() {
+    ConnectionPayloadPacket.serializer = new ConnectionPayloadPacket.Serializer() {
       @Override
-      public void read(ConnectionPacketWrapPacket packet, ByteBufferInput read) {
-        packet.raw = RawPacket.copyRemaining(read);
+      public void read(ConnectionPayloadPacket packet, ByteBufferInput read) {
+        packet.raw = new RawPacket(read, POOLED_RAW_PACKETS);
       }
-
       @Override
-      public void write(ConnectionPacketWrapPacket packet, ByteBufferOutput write) {
-        RawPacket.write(packet.raw, write);
+      public void write(ConnectionPayloadPacket packet, ByteBufferOutput write) {
+        packet.raw.write(write);
       }
     };
   }
@@ -73,6 +74,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
     };
   }
 
+  /** Note that an empty string is always returned. */
   public String readString(ByteBuffer buffer) {
     // We don't care of the data, it's just for compatibility reasons
     buffer.position(buffer.limit());
@@ -89,9 +91,8 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   }
 
   public RawPacket readRaw(ByteBuffer buffer) {
-    //TODO: buffer pool?
     buffer.position(buffer.position()-1);
-    return new RawPacket(buffer);
+    return new RawPacket(buffer, POOLED_RAW_PACKETS);
   }
 
   @Override
@@ -116,9 +117,9 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   }
 
   public void writeString(ByteBuffer buffer, String str) {
-    ByteBufferOutput writeo = write.get();
-    writeo.buffer = buffer;
+    ByteBufferOutput out = write.get();
+    out.buffer = buffer;
     buffer.put(ClajNet.oldId);
-    Strings.writeUTF(writeo, str);
+    Strings.writeUTF(out, str);
   }
 }

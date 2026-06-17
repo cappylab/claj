@@ -40,6 +40,7 @@ public class ClajConnection {
   /** hex version of {@link #id}. */
   public final String sid;
   public final Ratekeeper packetRate;
+
   protected ClajRoom room;
 
   public ClajConnection(Connection connection) {
@@ -73,7 +74,7 @@ public class ClajConnection {
     try {
       if(reliable) connection.sendTCP(object);
       else connection.sendUDP(object);
-    } catch (Exception e) { // Should not happen
+    } catch (Throwable e) { // Should not happen
       Log.err(e);
       Log.err("Error sending packet to connection @. Disconnecting invalid client!", sid);
       close(DcReason.error);

@@ -30,8 +30,8 @@ public class ConnectionClosedPacket extends ConnectionWrapperPacket {
   public DcReason reason;
 
   @Override
-  protected void readImpl(ByteBufferInput read) {
-    super.readImpl(read);
+  public void read(ByteBufferInput read) {
+    super.read(read);
     reason = reasons[read.readByte()];
   }
 

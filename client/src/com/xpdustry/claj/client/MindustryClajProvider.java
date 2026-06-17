@@ -36,7 +36,7 @@ import mindustry.net.Net.NetProvider;
 import mindustry.net.NetworkIO;
 
 import com.xpdustry.claj.api.*;
-import com.xpdustry.claj.common.packets.ConnectionPacketWrapPacket;
+import com.xpdustry.claj.common.packets.ConnectionPayloadPacket;
 import com.xpdustry.claj.common.status.*;
 
 
@@ -130,15 +130,15 @@ public class MindustryClajProvider implements ClajProvider {
   }
 
   @Override
-  public ConnectionPacketWrapPacket.Serializer getPacketWrapperSerializer() {
-    return new ConnectionPacketWrapPacket.Serializer() {
+  public ConnectionPayloadPacket.Serializer getPacketWrapperSerializer() {
+    return new ConnectionPayloadPacket.Serializer() {
       @Override
-      public void read(ConnectionPacketWrapPacket packet, ByteBufferInput read) {
+      public void read(ConnectionPayloadPacket packet, ByteBufferInput read) {
         packet.object = mindustrySerializer.read(read.buffer);
       }
 
       @Override
-      public void write(ConnectionPacketWrapPacket packet, ByteBufferOutput write) {
+      public void write(ConnectionPayloadPacket packet, ByteBufferOutput write) {
         mindustrySerializer.write(write.buffer, packet.object);
       }
     };

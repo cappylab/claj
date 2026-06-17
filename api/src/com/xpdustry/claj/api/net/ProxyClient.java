@@ -47,6 +47,8 @@ import com.xpdustry.claj.common.util.Structs;
  */
 public abstract class ProxyClient extends Client {
   public static int defaultTimeout = 5000; //ms
+  /** Delay between pings. */
+  public static int pingTime = 3000;
 
   // Redefine some internal states btw
   protected int connectTimeout;
@@ -68,6 +70,13 @@ public abstract class ProxyClient extends Client {
   protected final Queue<Object> packetQueue = new Queue<>();
   protected int writeBufferThreshold;
   protected volatile boolean hasQueued = false; // used for fast check
+  /**
+   * Whether to force using the tcp connection when sending trough udp to the server. <br>
+   * The server will then send it via udp to the real client. <br>
+   * This can fix some udp packet loss issues,
+   * at the cost of increased tcp band for things initially designed to be less important.
+   */
+  public volatile boolean forceTcp;
 
   public ProxyClient(int writeBufferSize, int objectBufferSize, NetSerializer serialization,
                      Cons<Runnable> taskPoster) {
@@ -160,7 +169,7 @@ public abstract class ProxyClient extends Client {
   }
 
   public void closeAllConnections(DcReason reason) {
-    for (VirtualConnection c : connections) c.closeQuietly(reason);
+    for (VirtualConnection c : getConnections()) c.closeQuietly(reason);
     clearConnections();
   }
 
@@ -192,12 +201,12 @@ public abstract class ProxyClient extends Client {
   public int send(VirtualConnection con, Object object, boolean tcp) {
     if(object == null) throw new IllegalArgumentException("object cannot be null.");
     Object p = makeConWrapPacket(con.getID(), object, tcp);
-    return tcp ? sendSafeTCP(p) : sendUDP(p);
+    return tcp || forceTcp ? sendSafeTCP(p) : sendUDP(p);
   }
 
   /**
    * Because all {@link VirtualConnection}s shares the same tcp buffer, it can be filled quickly. <br>
-   * This tries to queue packets when needed, to avoid an overflow.
+   * This tries to queue packets when needed, to avoid overflows.
    */
   public int sendSafeTCP(Object object) {
     // Fast path
@@ -225,7 +234,7 @@ public abstract class ProxyClient extends Client {
 
   /** Tries to mimic connection idling. */
   public void updateIdle() {
-    for (VirtualConnection c : connections) {
+    for (VirtualConnection c : getConnections()) {
       c.updateIdle();
       if (c.isIdle()) c.notifyIdle0();
     }
@@ -234,10 +243,9 @@ public abstract class ProxyClient extends Client {
   public void updatePing() {
     if (!isConnected()) return;
     long now = System.currentTimeMillis();
-    if (now - lastPing > 1) {
-      lastPing = now;
-      updateReturnTripTime();
-    }
+    if (now - lastPing <= pingTime) return;
+    lastPing = now;
+    updateReturnTripTime();
   }
 
   /**

@@ -273,7 +273,7 @@ public class ClajRoutines {
     }
 
     public boolean isOutdated() {
-      int life = ClajConfig.listLifetime.get() * 1_000_000_000;
+      long life = ClajConfig.listLifetime.get() * 1_000_000_000L;
       return life > 0 && Time.timeSinceNanos(lastUpdate) >= life;
     }
 

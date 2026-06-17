@@ -21,31 +21,35 @@ package com.xpdustry.claj.client;
 
 import arc.Core;
 import arc.net.Connection;
-import arc.util.Ratekeeper;
-
 import mindustry.Vars;
 import mindustry.net.*;
 import mindustry.net.Packets.KickReason;
 
 import com.xpdustry.claj.api.ClajProvider;
 import com.xpdustry.claj.api.ClajProxy;
-import com.xpdustry.claj.common.packets.ConnectionJoinPacket;
 import com.xpdustry.claj.common.util.Structs;
 
 
 public class MindustryClajProxy extends ClajProxy {
   //TODO: still useful?
-  /** No-op rate-keeper to prevent the local mindustry server from life blacklisting the claj server. */
+/*
+  /** No-op rate-keeper to prevent the local mindustry server from life blacklisting the claj server. *\/
   private static final Ratekeeper noopRate = new Ratekeeper() {
     @Override
     public boolean allow(long spacing, int cap) {
       return true;
     }
   };
+*/
 
   public MindustryClajProxy(ClajProvider provider) {
     super(provider);
 
+    // Try to fix some issues with entities not loading when receiving world
+    forceTcp = true;
+
+
+/* Deprecated, i think...
     // Modify listener to set the noop rate
     receiver.handle(ConnectionJoinPacket.class, p -> {
       NetConnection net = toMindustryConnection(getConnection(p.conID));
@@ -54,6 +58,7 @@ public class MindustryClajProxy extends ClajProxy {
       net.packetRate = noopRate;
       net.chatRate = noopRate;
     });
+*/
   }
 
   public Iterable<NetConnection> getMindustryConnections() {

@@ -1,0 +1,2 @@
+- auto room hosting to the nearest server
+- move Mindustry client/server implementation to another repo (claj-mindustry)

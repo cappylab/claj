@@ -27,7 +27,7 @@ public class ClajPackets {
   public static void init() {
     ClajNet.register(ConnectionJoinPacket::new);
     ClajNet.register(ConnectionClosedPacket::new);
-    ClajNet.register(ConnectionPacketWrapPacket::new);
+    ClajNet.register(ConnectionPayloadPacket::new);
     ClajNet.register(ConnectionIdlingPacket::new);
     ClajNet.register(RoomCreationRequestPacket::new); // <-- should be the 5th
     ClajNet.register(RoomClosureRequestPacket::new);  // These two MUST not be moved.
@@ -45,7 +45,7 @@ public class ClajPackets {
     ClajNet.register(RoomInfoPacket::new);
     ClajNet.register(RoomListRequestPacket::new);
     ClajNet.register(RoomListPacket::new);
-    ClajNet.register(ServerInfoPacket::new);
+    ClajNet.register(ServerInfoPacket::new); //TODO: remove this packet from list as it's special?
     ClajNet.register(ClajTextMessagePacket::new);
     ClajNet.register(ClajMessagePacket::new);
     ClajNet.register(ClajPopupPacket::new);

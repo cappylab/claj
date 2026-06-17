@@ -24,7 +24,7 @@ import java.util.concurrent.ExecutorService;
 
 import arc.net.NetListener;
 
-import com.xpdustry.claj.common.packets.ConnectionPacketWrapPacket.Serializer;
+import com.xpdustry.claj.common.packets.ConnectionPayloadPacket.Serializer;
 import com.xpdustry.claj.common.status.*;
 
 

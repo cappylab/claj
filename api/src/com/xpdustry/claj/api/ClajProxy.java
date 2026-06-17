@@ -60,7 +60,7 @@ public class ClajProxy extends ProxyClient {
 
     receiver.handle(ConnectionJoinPacket.class, p -> conConnected(p.conID, p.addressHash));
     receiver.handle(ConnectionClosedPacket.class, p -> conDisconnected(p.conID, p.reason));
-    receiver.handle(ConnectionPacketWrapPacket.class, p -> conReceived(p.conID, p.object));
+    receiver.handle(ConnectionPayloadPacket.class, p -> conReceived(p.conID, p.object));
     receiver.handle(ConnectionIdlingPacket.class, p -> conIdle(p.conID));
 
     receiver.handle(RoomClosedPacket.class, p -> runRoomClose(p.reason));
@@ -95,7 +95,10 @@ public class ClajProxy extends ProxyClient {
     this.roomId = roomId;
     link = new ClajLink(connectHost.getHostName(), connectTcpPort, roomId);
     // 0 is not allowed since it's used to specify an uncreated room
-    if (roomId == UNCREATED_ROOM) return;
+    if (roomId == UNCREATED_ROOM) {
+      runRoomClose(CloseReason.error);
+      return;
+    }
     if (roomCreated != null) postTask(roomCreated, link);
     notifyConfiguration();
     if (isPublic) notifyRoomState();
@@ -124,12 +127,6 @@ public class ClajProxy extends ProxyClient {
 
   public ClajLink link() {
     return link;
-  }
-
-  @Override
-  public void close() {
-    if (isConnected()) closeRoom();
-    super.close();
   }
 
   public void closeRoom() {
@@ -172,13 +169,11 @@ public class ClajProxy extends ProxyClient {
     if (!roomCreated()) return;
     ByteBuffer state = allowStateRequests ? provider.writeRoomState(this) : null;
     Packet p = makeRoomStatePacket(roomId, state);
-    if (state == null) {
-      sendTCP(p);
-      return;
+    if (state != null) {
+      state.flip();
+      if (state.remaining() >= RoomStatePacket.MAX_BUFF_SIZE)
+        throw new IllegalArgumentException("Buffer size must be less than " + RoomStatePacket.MAX_BUFF_SIZE);
     }
-    state.flip();
-    if (state.remaining() >= RoomStatePacket.MAX_BUFF_SIZE)
-      throw new IllegalArgumentException("Buffer size must be less than " + RoomStatePacket.MAX_BUFF_SIZE);
     sendTCP(p);
   }
 
@@ -210,7 +205,7 @@ public class ClajProxy extends ProxyClient {
 
   @Override
   protected Packet makeConWrapPacket(int conId, Object object, boolean tcp) {
-    ConnectionPacketWrapPacket p = new ConnectionPacketWrapPacket();
+    ConnectionPayloadPacket p = new ConnectionPayloadPacket();
     p.conID = conId;
     p.isTCP = tcp;
     p.object = object;
