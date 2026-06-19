@@ -22,7 +22,7 @@ subprojects {
   toxopid.compileVersion = "v${metadata.minGameVersion}"
   ext.compileVersionV8 = "158"
   ext.arcNet = "com.github.Anuken.Arc:arcnet:${toxopid.compileVersion}" //toxopid.dependencies.arcnet
-  
+
   repositories {
     mavenCentral()
     maven { url "https://maven.xpdustry.com/mindustry" }
@@ -38,7 +38,7 @@ subprojects {
     options.release = 8
     options.compilerArgs += ["-Xlint:-options", "-Xlint:unchecked"]
   }
-  
+
   dependencies {
     annotationProcessor "com.xpdustry:jabel:1.1.0"
   }
@@ -85,10 +85,10 @@ project(":client") {
     include "mod.hjson"
     include "icon.png"
   }
-	
+
   // Includes android dex
   build.dependsOn mergeJar
-  
+
   // For testing
   runMindustryDesktop.mods.from(mergeJar)
   task run(dependsOn: runMindustryDesktop) {
@@ -107,14 +107,14 @@ project(":server") {
     implementation arcNet
     implementation toxopid.dependencies.arcHeadless
   }
-  
+
   jar {
     manifest.attributes["Main-Class"] = project.mainClassName
     manifest.attributes["Claj-Version"] = metadata.version
     //TODO: use arc-lite
     //exclude "arc/assets/**", "arc/audio/**", "arc/input/**", "arc/scene/**", "arc/util/noise/**", "arc/util/viewport/**"
   }
-  
+
   task run(type: JavaExec, dependsOn: classes) {
     mainClass = project.mainClassName
     classpath = sourceSets.main.runtimeClasspath
@@ -137,40 +137,45 @@ subprojects {
 // Publishing
 subprojects {
   apply plugin: "net.kyori.indra.publishing"
-  
+
   signing {
     def signingKey = findProperty("signingKey")
     def signingPassword = findProperty("signingPassword")
     useInMemoryPgpKeys(signingKey, signingPassword)
   }
-  
+
   indra {
     javaVersions {
       target(8)
       minimumToolchain(8)
     }
-      
+
     gpl3OnlyLicense()
     publishReleasesTo("xpdustry", "https://maven.xpdustry.com/releases")
-  
+
     def repo = metadata.repository.split("/")
     github(repo[0], repo[1]) {
       ci(true)
       issues(true)
       scm(true)
     }
-  
+
     configurePublications {
       from components.java
       artifact sourcesJar
       artifact javadocJar
-    
+
+      // To simplify modding, we also publish a version with all dependencies
+      if (project.name == "server") {
+        artifact(release) { classifier = "all" }
+      }
+
       pom {
         organization {
           name = "Xpdustry"
           url = "https://www.xpdustry.com"
         }
-  
+
         developers {
           metadata.author.split(",").each { author ->
             developer {
@@ -182,7 +187,7 @@ subprojects {
       }
     }
   }
-  
+
   // I want these to only be included when publishing, not all the time...
   task javadocJar(type: Jar, dependsOn: 'javadoc') {
     from javadoc.destinationDir
