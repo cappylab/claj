@@ -59,7 +59,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   public final LongMap<ClajRoom> rooms = new LongMap<>();
   /** Rooms sorted by type. DO NOT EDIT MANUALLY! */
   public final ObjectMap<ClajType, LongMap<ClajRoom>> types = new ObjectMap<>(8);
-  /** As the server is very talkative, here is a field to shut up logs (excepts debug) for a time, if you want. */
+  /** As the server is very talkative, here is a field to shut up logs (excepts debug and errors) for a time. */
   public volatile boolean beQuiet;
   /** Total number of clients in rooms. */
   protected int clientsInRooms;
@@ -79,13 +79,14 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   public ClajRelay() { this(null); }
   public ClajRelay(NetworkSpeed speedCalculator) {
-    super(32768, 32768, new ClajServerSerializer(speedCalculator));
+    super(131072, 32768, new ClajServerSerializer(speedCalculator));
     networkSpeed = speedCalculator;
     receiver = new ServerReceiver(this, Core.app::post);
     routines = new ClajRoutines();
 
-    // Preload first bucket of buffer pool
+    // Preload first and second buckets of buffer pool
     ByteBufferPool.get().fill(1);
+    ByteBufferPool.get().fill(2);
 
     setDiscoveryHandler((_, r) -> {
       if (versionBuff == null)
@@ -203,9 +204,10 @@ public class ClajRelay extends Server implements ApplicationListener {
     ClajRoom room = connection.currentRoom();
     if (removeClient(connection, reason)){
       info("Room @ closed because connection @ (the host) has disconnected.", room.sid, connection.sid);
-    } else if (room != null) {
-      info("Connection @ left the room @.", connection.sid, room.sid);
-    }
+    } else if (room == null) return;
+    if (room.isClosed()) Log.err("Failed to remove connection @ from room @. The room has been closed",
+                                 connection.sid, room.sid);
+    else info("Connection @ left the room @.", connection.sid, room.sid);
   }
 
   public void onIdle(ClajConnection connection) {
@@ -258,8 +260,15 @@ public class ClajRelay extends Server implements ApplicationListener {
     }
 
     room = createRoom(connection, type);
-    info("Room @ created by connection @.", room.sid, connection.sid);
-    return null;
+    // In case of
+    if (room.isClosed()) {
+      rejectRoomCreation(connection, CloseReason.error);
+      Log.err("Failed to create room @ requested by connection @.", room.sid, connection.sid);
+      return CloseReason.error;
+    } else {
+      info("Room @ created by connection @.", room.sid, connection.sid);
+      return null;
+    }
   }
 
   /** @return whether the action was allowed or not. */
@@ -291,7 +300,7 @@ public class ClajRelay extends Server implements ApplicationListener {
              Strings.longToBase64(roomId), room.sid);
         return RejectReason.error;
       }
-      room.disconnected(connection, DcReason.closed);
+      removeClient(connection);
     }
 
     room = getRoom(roomId);
@@ -304,7 +313,7 @@ public class ClajRelay extends Server implements ApplicationListener {
            room == null ? Strings.longToBase64(roomId) : room.sid);
       return RejectReason.serverClosing;
 
-    } else if (room == null) {
+    } else if (room == null || room.isClosed()) {
       if (isRequest) rejectRoomJoin(connection, room, roomId, RejectReason.roomNotFound);
       else connection.close(DcReason.error);
       warn("Connection @ tried to join a not found room. (id: @)", connection.sid, Strings.longToBase64(roomId));
@@ -350,10 +359,17 @@ public class ClajRelay extends Server implements ApplicationListener {
       return null;
     }
 
-    addClient(room, connection);
-    info("Connection @ joined the room @. (type: @)", connection.sid, room.sid, type);
-    handleQueue(connection, room);
-    return null;
+    if (addClient(room, connection)) {
+      info("Connection @ joined the room @. (type: @)", connection.sid, room.sid, type);
+      handleQueue(connection, room);
+      return null;
+    } else {
+      removeQueue(connection);
+      if (isRequest) rejectRoomJoin(connection, room, roomId, RejectReason.error);
+      else connection.close(DcReason.error);
+      Log.err("Failed to add connection @ to room @. The room has been closed.", connection.sid, room.sid);
+      return RejectReason.error;
+    }
   }
 
   /** @return whether the action was allowed or not. */
@@ -468,7 +484,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     ClajRoom room = connection.currentRoom();
 
     // Ignore when trying to close itself or one that not in the same room
-    if (target == null || target == connection || !room.contains(target)) {
+    if (target == null || target == connection || room.isClosed() || !room.contains(target)) {
       denyAction(connection, room, MessageType.conClosureDenied);
       warn("Connection @ from room @ tried to close a " +
            (target == null ? "not found connection" : "connection of another room") + ". (id: @)",
@@ -476,9 +492,11 @@ public class ClajRelay extends Server implements ApplicationListener {
       return false;
     }
 
-    info("Connection @ (the host) from room @ closed connection @.", connection.sid, room.sid, tsid);
-    room.disconnectedQuietly(target, reason);
+    removeClient(target, reason, true);
     target.close(reason);
+    if (!room.isHost(target) && room.isClosed())
+      Log.err("Failed to remove connection @ from room @. The room has been closed", tsid, room.sid);
+    else info("Connection @ (the host) from room @ closed connection @.", connection.sid, room.sid, tsid);
     return true;
   }
 
@@ -600,17 +618,18 @@ public class ClajRelay extends Server implements ApplicationListener {
     clientsInRooms = 0;
   }
 
-  /** Creates a room with it's associated caches. */
+  /** Creates a room with it's associated caches. If the room failed to create, it will immediately closed. */
   public ClajRoom createRoom(ClajConnection host, ClajType type) {
     ClajRoom room = newRoom(host, type);
     rooms.put(room.id, room);
     if (type != null) types.get(type, LongMap::new).put(room.id, room);
     room.create();
-    routines.scheludeRoomAfk(room, () -> {
+    clientsInRooms++;
+    if (room.isClosed()) closeRoom(room);
+    else routines.scheludeRoomAfk(room, () -> {
       closeRoom(room, CloseReason.afk);
       info("Room @ closed due to a long period without anyone joining in.", room.sid);
     });
-    clientsInRooms++;
     return room;
   }
 
@@ -657,32 +676,47 @@ public class ClajRelay extends Server implements ApplicationListener {
     return number;
   }
 
-  public void addClient(ClajRoom room, ClajConnection con) {
-    if (con == null || room == null) return;
+  /** @return whether the client has been added to the room or not. */
+  public boolean addClient(ClajRoom room, ClajConnection con) {
+    if (con == null || room == null) return false;
+    int clients = room.clients.size; // because all clients will be kicked before cleaning cache
     room.connected(con);
+    if (room.isClosed()) {
+      clientsInRooms -= clients;
+      closeRoom(room);
+      return false;
+    }
     routines.cancelRoomAfk(room);
     clientsInRooms++;
+    return true;
   }
 
+  public boolean removeClient(ClajConnection con) { return removeClient(con, DcReason.closed); }
+  public boolean removeClient(ClajConnection con, DcReason reason) { return removeClient(con, reason, false); }
   /** @return whether client was the host. If so the room will be closed. */
-  public boolean removeClient(ClajConnection con, DcReason reason) {
+  public boolean removeClient(ClajConnection con, DcReason reason, boolean quiet) {
     if (con == null) return false;
     routines.clearClientCache(con);
     ClajRoom room = con.currentRoom();
-    if (room != null) {
-      room.disconnected(con, reason);
-      // Close the room if it was the host
-      if (room.isHost(con)) {
-        closeRoom(room);
-        return true;
-      }
+    if (room == null) return false;
+    boolean wasHost = con.isRoomHost();
+    int clients = room.clients.size; // because all clients will be kicked before cleaning cache
+
+    if (quiet) room.disconnectedQuietly(con, reason);
+    else room.disconnected(con, reason);
+
+    // Close the room if it was the host
+    if (!wasHost && !room.isClosed()) {
       routines.scheludeRoomAfk(room, () -> {
         closeRoom(room, CloseReason.afk);
         info("Room @ closed due to a long period without anyone joining in.", room.sid);
       });
       clientsInRooms--;
+    } else {
+      clientsInRooms -= clients;
+      closeRoom(room);
     }
-    return false;
+    return wasHost;
   }
 
   public void setRoomConfiguration(ClajRoom room, boolean isPublic, boolean isProtected, short password,
@@ -772,10 +806,11 @@ public class ClajRelay extends Server implements ApplicationListener {
   public boolean checkRateLimit(ClajConnection con) {
     if (con == null) return true;
     ClajRoom room = con.currentRoom();
-    int limit = con.isRoomHost() ? ClajConfig.hostSpamLimit.get() * room.clients.size : ClajConfig.spamLimit.get();
+    boolean isHost = room != null && room.isHost(con);
+    int limit = isHost ? ClajConfig.hostSpamLimit.get() * room.clients.size : ClajConfig.spamLimit.get();
     boolean isRated = limit > 0 && !con.packetRate.allow(3000L, limit);
     if (isRated) {
-      if (con.isRoomHost()) rejectRateLimitedHost(room);
+      if (isHost) rejectRateLimitedHost(room);
       else rejectRateLimitedClient(con);
     }
     return !isRated;
@@ -787,6 +822,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   /** @return whether a slot was found or not. */
   public boolean addQueue(Connection con, RawPacket packet) {
     if (packet.data().remaining() >= packetSizeInQueue) {
+      packet.free();
       removeQueue(con);
       con.close(DcReason.error);
       Log.warn("Connection @ kicked for sending too big packets in the queue.", AddressUtil.encodeId(con));
@@ -857,7 +893,7 @@ public class ClajRelay extends Server implements ApplicationListener {
       //check?
       if (room != null) {
         room.message(MessageType.packetSpamming);
-        room.disconnected(connection, DcReason.closed);
+        removeClient(connection);
       }
       warn("Connection @ (@) disconnected for packet spamming.", connection.sid, connection.address);
       Events.fire(new ClientKickedEvent(connection));

@@ -45,7 +45,13 @@ subprojects {
 
   // Make fat jar
   task release(type: Jar, dependsOn: build) {
-    from sourceSets.main.output
+    def releaseJar = { ModPlatform.ANDROID in toxopid.platforms.get() ? mergeJar : jar }
+    dependsOn releaseJar
+    manifest.from releaseJar().manifest
+    from { 
+      zipTree(releaseJar().archiveFile) 
+    }
+    // Add dependencies
     from {
       configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
@@ -81,13 +87,13 @@ project(":client") {
   }
 
   // Includes mod json and icon
-  mergeJar.from(rootDir) {
+  processResources.from(rootDir) {
     include "mod.hjson"
     include "icon.png"
   }
 
   // Includes android dex
-  build.dependsOn mergeJar
+  assemble.dependsOn mergeJar
 
   // For testing
   runMindustryDesktop.mods.from(mergeJar)

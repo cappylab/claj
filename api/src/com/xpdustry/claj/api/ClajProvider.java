@@ -28,7 +28,7 @@ import com.xpdustry.claj.common.packets.ConnectionPayloadPacket.Serializer;
 import com.xpdustry.claj.common.status.*;
 
 
-/** Interface to provide implementation dependent client-side things. */
+/** Interface to provide client implementation dependent things. */
 public interface ClajProvider {
   /** Used to post tasks to the main thread, when receiving a packet or running a callback. */
   default void postTask(Runnable task) { task.run(); }

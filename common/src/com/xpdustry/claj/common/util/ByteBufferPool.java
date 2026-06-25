@@ -36,7 +36,7 @@ public final class ByteBufferPool {
   private final ConcurrentHashMap<Integer, Bucket> buckets = new ConcurrentHashMap<>();
   public final int factor, bucketCap;
 
-  public ByteBufferPool() { this(1024, 1024); }
+  public ByteBufferPool() { this(1024, 512); }
   public ByteBufferPool(int factor, int bucketCap) {
     this.factor = factor;
     this.bucketCap = bucketCap;
