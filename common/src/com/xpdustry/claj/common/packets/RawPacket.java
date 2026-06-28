@@ -113,6 +113,7 @@ public class RawPacket implements Packet {
       write.write(src.array(), src.arrayOffset() + src.position(), src.remaining());
     } else {
       // Not safe to write buffer directly
+      //TODO: optimize
       int pos = src.position();
       byte[] bytes = new byte[src.remaining()];
       src.get(bytes);

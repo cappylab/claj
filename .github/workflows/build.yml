@@ -37,7 +37,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           path: build/release/*.jar
-          name: claj-artifacts
+          name: ${{ github.event.repository.name }}-artifacts
           if-no-files-found: error
 
       - name: Publish Artifacts

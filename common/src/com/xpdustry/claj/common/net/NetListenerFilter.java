@@ -29,6 +29,6 @@ public interface NetListenerFilter {
   default boolean connected(Connection connection) { return true; }
   default boolean disconnected(Connection connection, DcReason reason) { return true; }
   default boolean received(Connection connection, Object object) { return true; }
-  /** In general idle events are always discarded. */
+  /** Usually idle events are always discarded. */
   default boolean idle(Connection connection) { return false; }
 }
