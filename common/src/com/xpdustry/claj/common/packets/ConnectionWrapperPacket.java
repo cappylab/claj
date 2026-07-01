@@ -24,7 +24,7 @@ import arc.util.io.ByteBufferOutput;
 
 
 public abstract class ConnectionWrapperPacket implements Packet {
-  //TODO: a broadcast system to save more bandwidth
+  /** {@code 0} can be used to broadcast message. */
   public int conID;
 
   @Override

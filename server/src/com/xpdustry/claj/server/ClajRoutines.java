@@ -87,7 +87,7 @@ public class ClajRoutines {
   // region room afk
 
   public void scheludeRoomAfk(ClajRoom room, Runnable afkClose) {
-    if (!room.clients.isEmpty()) return;
+    if (!room.isEmpty()) return;
     int life = ClajConfig.afkTime.get();
     if (life <= 0) return;
     Timer.Task old = afk.put(room.id, Timer.schedule(() -> {

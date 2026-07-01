@@ -19,15 +19,22 @@
 
 package com.xpdustry.claj.client;
 
+import java.lang.reflect.Field;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+
 import arc.Core;
 import arc.net.Connection;
+import arc.net.DcReason;
+import arc.util.Structs;
+
 import mindustry.Vars;
 import mindustry.net.*;
 import mindustry.net.Packets.KickReason;
 
 import com.xpdustry.claj.api.ClajProvider;
 import com.xpdustry.claj.api.ClajProxy;
-import com.xpdustry.claj.common.util.Structs;
+import com.xpdustry.claj.api.net.VirtualConnection;
 
 
 public class MindustryClajProxy extends ClajProxy {
@@ -41,6 +48,8 @@ public class MindustryClajProxy extends ClajProxy {
     }
   };
 */
+
+
 
   public MindustryClajProxy(ClajProvider provider) {
     super(provider);
@@ -61,34 +70,85 @@ public class MindustryClajProxy extends ClajProxy {
 */
   }
 
+  public static boolean isMindustryConnection(Connection con) {
+    return con.getArbitraryData() instanceof NetConnection;
+  }
+
+  public static NetConnection toMindustryConnection(Connection con) {
+    return con != null && con.getArbitraryData() instanceof NetConnection nc ? nc : null;
+  }
+
+  static final Field connectionField;
+  static {
+    Field f = null;
+    try {
+      Class<?> clazz = Structs.find(ArcNetProvider.class.getDeclaredClasses(),
+                                    c -> "ArcConnection".equals(c.getSimpleName()));
+      if (clazz != null) f = clazz.getDeclaredField("connection");
+    } catch (Exception _) {}
+    connectionField = f;
+  }
+
+  /** Really difficult to convert as ArcConnection is package-private. Reflection is used. */
+  public static VirtualConnection toVirtualConnection(NetConnection con) {
+    if (connectionField == null) return null;
+    try { return connectionField.get(con) instanceof VirtualConnection vcon ? vcon : null; }
+    catch (Exception e) { return null; }
+  }
+
   public Iterable<NetConnection> getMindustryConnections() {
-    return Structs.generator(getConnections(),
-                             MindustryClajProxy::isMindustryConnection,
-                             MindustryClajProxy::toMindustryConnection);
+    return () -> new Iterator<>() {
+      NetConnection next;
+      int index;
+
+      @Override
+      public boolean hasNext() {
+        if (next != null) return true;
+        while (index < getInternalConnections().size) {
+          next = toMindustryConnection(getInternalConnections().get(index));
+          if (next != null) return true;
+          index++;
+        }
+        return false;
+      }
+
+      @Override
+      public NetConnection next() {
+        if (!hasNext()) throw new NoSuchElementException();
+        NetConnection value = next;
+        next = null;
+        return value;
+      }
+    };
   }
 
   public int getMindustryConnectionsSize() {
-    return Structs.count(getConnections(), MindustryClajProxy::isMindustryConnection);
+    return getInternalConnections().count(MindustryClajProxy::isMindustryConnection);
   }
 
-  public static boolean isMindustryConnection(Connection connection) {
-    return connection.getArbitraryData() instanceof NetConnection;
-  }
-
-  public static NetConnection toMindustryConnection(Connection connection) {
-    return connection != null && connection.getArbitraryData() instanceof NetConnection nc ? nc : null;
+  /**
+   * We cannot easily convert to VirtualConnection as ArcConnection is package-private.
+   * So we'll need to use the reverse path
+   */
+  public VirtualConnection getConnection(NetConnection con) {
+    //VirtualConnection vcon = toVirtualConnection(con);
+    //return vcon != null && getConnection(vcon.getID()) == vcon ? vcon : null;
+    return getInternalConnections().find(c -> {
+      NetConnection nc = toMindustryConnection(c);
+      return nc != null && nc == con;
+    });
   }
 
   public void kickAllConnections(KickReason reason) {
-    for (NetConnection con : getMindustryConnections())
-      con.kick(reason);
+    // No way to broadcast kick here
+    for (NetConnection con : getMindustryConnections()) con.kick(reason);
   }
 
   @Override
-  public void closeRoom() {
-    // Kick players before
-    kickAllConnections(KickReason.serverClose);
-    super.closeRoom();
+  public void closeAllConnections(DcReason reason) {
+    // Kick players before, if we can
+    if (isConnected()) kickAllConnections(KickReason.serverClose);
+    super.closeAllConnections(reason);
   }
 
   public Host getState() {

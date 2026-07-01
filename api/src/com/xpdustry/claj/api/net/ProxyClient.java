@@ -24,17 +24,11 @@ import java.net.InetAddress;
 import java.nio.channels.ClosedSelectorException;
 
 import arc.func.Cons;
-import arc.net.ArcNetException;
-import arc.net.Client;
-import arc.net.DcReason;
-import arc.net.NetListener;
-import arc.net.NetSerializer;
-import arc.struct.IntMap;
-import arc.struct.Queue;
+import arc.net.*;
+import arc.struct.*;
 
 import com.xpdustry.claj.common.ClajPackets.Disconnect;
 import com.xpdustry.claj.common.net.ClientReceiver;
-import com.xpdustry.claj.common.util.Structs;
 
 
 /**
@@ -56,10 +50,9 @@ public abstract class ProxyClient extends Client {
   protected int connectTcpPort;
   protected int connectUdpPort;
 
-  /** For faster get. */
-  protected final IntMap<VirtualConnection> connectionsMap = new IntMap<>();
-  /** For faster iteration. */
-  protected VirtualConnection[] connections = {};
+  protected final IntMap<VirtualConnection> connectionsMap = new IntMap<>(16);
+  protected final Seq<VirtualConnection> connections = new Seq<>(false);
+
   protected NetListener conListener;
   protected volatile boolean shutdown = true, starting, connecting;
   protected ClientReceiver receiver;
@@ -76,17 +69,19 @@ public abstract class ProxyClient extends Client {
    * This can fix some udp packet loss issues,
    * at the cost of increased tcp band for things initially designed to be less important.
    */
-  public volatile boolean forceTcp;
+  public boolean forceTcp;
 
   public ProxyClient(int writeBufferSize, int objectBufferSize, NetSerializer serialization,
                      Cons<Runnable> taskPoster) {
     super(writeBufferSize, objectBufferSize, serialization);
     receiver = new ClientReceiver(this, taskPoster);
-    writeBufferThreshold = (int)(writeBufferSize * 0.8f);
+    writeBufferThreshold = (int)(writeBufferSize * 0.9f);
+    setIdleThreshold(0.2f);
 
     receiver.handle(Disconnect.class, _ -> {
       Throwable error = getLastProtocolError();
       if (error != null) errorHandler.get(error);
+      clearPaquetQueue();
     });
   }
 
@@ -101,6 +96,8 @@ public abstract class ProxyClient extends Client {
 
   @Override
   public void connect(int timeout, InetAddress host, int tcpPort, int udpPort) throws IOException {
+    //TODO: add an option to prefer connecting only via tcp,
+    //      as udp is not reliable for this kind of thing.
     connecting = true;
     connectTimeout = timeout;
     connectHost = host;
@@ -115,7 +112,7 @@ public abstract class ProxyClient extends Client {
     updatePing();
     super.update(timeout);
     updateIdle();
-    flushPacketQueue();
+    if (isIdle()) flushPacketQueue(); // only flush when idle to avoid ping-pong
   }
 
   @Override
@@ -163,45 +160,75 @@ public abstract class ProxyClient extends Client {
 
   @Override
   public void close(DcReason reason) {
+    clearPaquetQueue();
     // We cannot communicate with the server anymore, so close all virtual connections
     closeAllConnections(reason);
     super.close(reason);
   }
 
   public void closeAllConnections(DcReason reason) {
-    for (VirtualConnection c : getConnections()) c.closeQuietly(reason);
+    if (isConnected()) flushPacketQueue(); // flush queue one last time, in case of
+    for (VirtualConnection c : getConnections()) {
+      boolean wasConnected = c.isConnected();
+      c.setConnected0(false);
+      if(wasConnected) c.notifyDisconnected0(reason);
+      c.resetIdle();
+    }
+    if (isConnected() && connections.any()) sendTCP(makeBroadcastClosePacket(reason));
     clearConnections();
   }
 
   protected void addConnection(VirtualConnection con) {
     connectionsMap.put(con.getID(), con);
-    // Connections are added at the start instead of end
-    //connections = Structs.add(connections, con);
-    connections = Structs.insert(connections, 0, con);
+    connections.add(con);
   }
 
   protected void removeConnection(VirtualConnection con) {
     connectionsMap.remove(con.getID());
-    connections = Structs.remove(connections, con);
+    connections.remove(con);
   }
 
   protected void clearConnections() {
     connectionsMap.clear();
-    connections = new VirtualConnection[0];
+    connections.clear();
   }
 
   public VirtualConnection getConnection(int id) {
     return connectionsMap.get(id);
   }
 
-  public VirtualConnection[] getConnections() {
+  protected Seq<VirtualConnection> getInternalConnections() {
     return connections;
   }
 
+  public Iterable<VirtualConnection> getConnections() {
+    return connections;
+  }
+
+  public void eachConnections(Cons<VirtualConnection> consumer) {
+    connections.each(consumer);
+  }
+
+  /**
+   * Send an object to every clients connected to the room. <br>
+   * This is an optimization method to avoid the host from sending the same packet to every virtual clients,
+   * as the server will do it to the real ones instead. So, using this will save bandwidth.
+   */
+  public int broadcast(Object object, boolean tcp) {
+    if (object == null) throw new IllegalArgumentException("object cannot be null.");
+    if (connections.isEmpty()) return 0; // no need to broadcast is there is no clients
+    Object p = makeBroadcastWrapPacket(object, tcp);
+    int written = tcp || forceTcp ? sendSafeTCP(p) : sendUDP(p);
+    eachConnections(VirtualConnection::resetIdle);
+    return written;
+  }
+
   public int send(VirtualConnection con, Object object, boolean tcp) {
-    if(object == null) throw new IllegalArgumentException("object cannot be null.");
+    if (object == null) throw new IllegalArgumentException("object cannot be null.");
     Object p = makeConWrapPacket(con.getID(), object, tcp);
-    return tcp || forceTcp ? sendSafeTCP(p) : sendUDP(p);
+    int written = tcp || forceTcp ? sendSafeTCP(p) : sendUDP(p);
+    con.resetIdle();
+    return written;
   }
 
   /**
@@ -232,6 +259,13 @@ public abstract class ProxyClient extends Client {
     }
   }
 
+  public void clearPaquetQueue() {
+    synchronized (packetQueue) {
+      packetQueue.clear();
+      hasQueued = false;
+    }
+  }
+
   /** Tries to mimic connection idling. */
   public void updateIdle() {
     for (VirtualConnection c : getConnections()) {
@@ -253,7 +287,7 @@ public abstract class ProxyClient extends Client {
    * This will not trigger callbacks.
    */
   protected void close(int conId, DcReason reason) {
-    sendTCP(makeConClosePacket(conId, reason));
+    if (isConnected()) sendTCP(makeConClosePacket(conId, reason));
   }
 
   public void close(VirtualConnection con, DcReason reason) {
@@ -267,6 +301,7 @@ public abstract class ProxyClient extends Client {
     con.setConnected0(false);
     if(wasConnected) con.notifyDisconnected0(reason);
     removeConnection(con);
+    con.resetIdle();
   }
 
   /** @return never {@code null}. */
@@ -299,6 +334,8 @@ public abstract class ProxyClient extends Client {
     return con;
   }
 
+  protected abstract Object makeBroadcastWrapPacket(Object object, boolean tcp);
+  protected abstract Object makeBroadcastClosePacket(DcReason reason);
   protected abstract Object makeConWrapPacket(int conId, Object object, boolean tcp);
   protected abstract Object makeConClosePacket(int conId, DcReason reason);
 }

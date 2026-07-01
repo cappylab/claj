@@ -27,15 +27,32 @@ import arc.util.Time;
 import mindustry.Vars;
 import mindustry.game.EventType;
 import mindustry.gen.KickCallPacket2;
+import mindustry.io.JsonIO;
 import mindustry.mod.Mod;
 import mindustry.mod.Mods;
+import mindustry.net.Net;
+import mindustry.net.NetConnection;
 import mindustry.net.Packets.KickReason;
 
 import com.xpdustry.claj.api.Claj;
+import com.xpdustry.claj.api.ClajProxy;
 
 
 public class Main extends Mod {
-  public static MindustryClajProvider provider;
+  private static MindustryClajProvider provider;
+  private static Mods.ModMeta meta;
+
+  /** @return the mod meta, using this class. */
+  public static Mods.ModMeta getMeta() {
+    if (meta != null) return meta;
+    Mods.LoadedMod load = Vars.mods.getMod(Main.class);
+    if(load == null) throw new IllegalArgumentException("Mod is not loaded yet (or missing)!");
+    return meta = load.meta;
+  }
+
+  public static MindustryClajProvider getProvider() {
+    return provider;
+  }
 
   @Override
   public void init() {
@@ -43,6 +60,7 @@ public class Main extends Mod {
     Claj.init(provider);
     ClajUpdater.schedule();
     initEvents();
+    initBroadcastHook();
     ClajUi.init();
   }
 
@@ -85,10 +103,42 @@ public class Main extends Mod {
     ClajUi.join.resetLastLink(); // Avoid reconnect to a room after connecting to a normal server
   }
 
-  /** @return the mod meta, using this class. */
-  public static Mods.ModMeta getMeta() {
-    Mods.LoadedMod load = Vars.mods.getMod(Main.class);
-    if(load == null) throw new IllegalArgumentException("Mod is not loaded yet (or missing)!");
-    return load.meta;
+  public void initBroadcastHook() {
+    if (Vars.net.getClass() != Net.class) return; // Replaced by another mod or us
+    Net hook = new Net(MindustryClajProvider.mindustryProvider) {
+      @Override
+      public void send(Object object, boolean reliable) {
+        ClajProxy proxy;
+        if (!server() || !(proxy = Claj.get().proxies.get()).roomCreated())
+          super.send(object, reliable);
+        else broadcast(proxy, object, reliable);
+      }
+
+      @Override
+      public void sendExcept(NetConnection except, Object object, boolean reliable) {
+        ClajProxy proxy;
+        if (!server() || !(proxy = Claj.get().proxies.get()).roomCreated() ||
+            // Cannot exclude a CLaJ connection from broadcast
+            (proxy instanceof MindustryClajProxy mproxy && mproxy.getConnection(except) != null))
+          super.sendExcept(except, object, reliable);
+        else broadcast(proxy, object, reliable);
+      }
+
+      public void broadcast(ClajProxy proxy, Object object, boolean reliable) {
+        if (!(proxy instanceof MindustryClajProxy mproxy)) {
+          for (NetConnection con : getConnections()) con.send(object, reliable);
+        } else {
+          for (NetConnection con : getConnections()) {
+            // Yea, difficult to know that directly, so we'll use the slow reverse path
+            //if (MindustryClajProxy.toVirtualConnection(con) != null) continue;
+            if (mproxy.getConnection(con) != null) continue;
+            con.send(object, reliable);
+          }
+          proxy.broadcast(object, reliable);
+        }
+      }
+    };
+    JsonIO.json.copyFields(Vars.net, hook, true);
+    Vars.net = hook;
   }
 }

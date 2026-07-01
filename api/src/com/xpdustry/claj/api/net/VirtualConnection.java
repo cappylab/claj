@@ -68,28 +68,16 @@ public class VirtualConnection extends Connection {
   }
 
   @Override
-  public int sendTCP(Object object) {
-    resetIdle();
-    return proxy.send(this, object, true);
-  }
+  public int sendTCP(Object object) { return proxy.send(this, object, true); }
   @Override
-  public int sendUDP(Object object) {
-    resetIdle();
-    return proxy.send(this, object, false);
-  }
+  public int sendUDP(Object object) { return proxy.send(this, object, false); }
   @Override
-  public void close(DcReason reason) {
-    resetIdle();
-    proxy.close(this, reason);
-  }
+  public void close(DcReason reason) { proxy.close(this, reason); }
   /**
    * Close the connection without notify the server about that. <br>
    * Common use is when the server itself is saying to close the connection.
    */
-  public void closeQuietly(DcReason reason) {
-    resetIdle();
-    proxy.closeQuietly(this, reason);
-  }
+  public void closeQuietly(DcReason reason) { proxy.closeQuietly(this, reason); }
 
   public NetListener[] getListeners() { return dispatcher.getListeners(); }
   /** Only used when sending world data */

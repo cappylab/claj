@@ -37,6 +37,11 @@ import com.xpdustry.claj.common.status.CloseReason;
 public class ClajProxy extends ProxyClient {
   /** Constant value saying that no room is created. This should be handled as an invalid id. */
   public static final long UNCREATED_ROOM = 0;
+  /**
+   * Id meaning that that the connection is invalid, and used to broadcast packets to all clients. <br>
+   * This is used for disconnect, received and idle events, but not for connected one, as it makes no sense.
+   */
+  public static final int CON_BROADCAST = 0;
 
   public final ClajProvider provider;
   public boolean isPublic, isProtected, allowStateRequests;
@@ -73,7 +78,8 @@ public class ClajProxy extends ProxyClient {
   }
 
   /** This method must be used instead of others connect methods */
-  public void connect(String host, int port, Cons<ClajLink> created, Cons<CloseReason> closed, Cons<Throwable> failed) {
+  public void connect(String host, int port, Cons<ClajLink> created, Cons<CloseReason> closed,
+                      Cons<Throwable> failed) {
     try {
       connect(host, port);
       roomCreated = created;
@@ -122,7 +128,7 @@ public class ClajProxy extends ProxyClient {
   }
 
   public boolean roomCreated() {
-    return roomId != UNCREATED_ROOM;
+    return isConnected() && roomId != UNCREATED_ROOM;
   }
 
   public ClajLink link() {
@@ -157,7 +163,7 @@ public class ClajProxy extends ProxyClient {
     this.roomPassword = roomPassword;
     this.allowStateRequests = allowStateRequests;
     if (notify) notifyConfiguration();
-    if (wasPrivate && this.isPublic) notifyRoomState();
+    if (wasPrivate && isPublic) notifyRoomState();
   }
 
   public void notifyConfiguration() {
@@ -183,7 +189,8 @@ public class ClajProxy extends ProxyClient {
     return p;
   }
 
-  protected Packet makeRoomConfigPacket(boolean isPublic, boolean isProtected, short password, boolean requestState) {
+  protected Packet makeRoomConfigPacket(boolean isPublic, boolean isProtected, short password,
+                                        boolean requestState) {
     RoomConfigPacket p = new RoomConfigPacket();
     p.isPublic = isPublic;
     p.isProtected = isProtected;
@@ -204,6 +211,16 @@ public class ClajProxy extends ProxyClient {
   }
 
   @Override
+  protected Packet makeBroadcastWrapPacket(Object object, boolean tcp) {
+    return makeConWrapPacket(CON_BROADCAST, object, tcp);
+  }
+
+  @Override
+  protected Packet makeBroadcastClosePacket(DcReason reason) {
+    return makeConClosePacket(CON_BROADCAST, reason);
+  }
+
+  @Override
   protected Packet makeConWrapPacket(int conId, Object object, boolean tcp) {
     ConnectionPayloadPacket p = new ConnectionPayloadPacket();
     p.conID = conId;
@@ -220,25 +237,40 @@ public class ClajProxy extends ProxyClient {
     return p;
   }
 
+  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
   @Override
   protected VirtualConnection conConnected(int conId, long addressHash) {
     if (!roomCreated()) return null;
-    VirtualConnection con = getConnection(conId);
+    // Of course broadcasting a connect event makes no sense.
+    if (conId == CON_BROADCAST) return null;
+    VirtualConnection con = getConnection(conId); // avoid multiple connect events
     return con == null ? super.conConnected(conId, addressHash) : con;
   }
 
+  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
   @Override
   protected VirtualConnection conDisconnected(int conId, DcReason reason) {
-    return roomCreated() ? super.conDisconnected(conId, reason) : null;
+    if (!roomCreated()) return null;
+    if (conId != CON_BROADCAST) return super.conDisconnected(conId, reason);
+    eachConnections(c -> closeQuietly(c, reason));
+    return null;
   }
 
+  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
   @Override
   protected VirtualConnection conReceived(int conId, Object object) {
-    return roomCreated() ? super.conReceived(conId, object) : null;
+    if (!roomCreated()) return null;
+    if (conId != CON_BROADCAST) return super.conReceived(conId, object);
+    eachConnections(c -> c.notifyReceived0(object));
+    return null;
   }
 
+  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
   @Override
   protected VirtualConnection conIdle(int conId) {
-    return roomCreated() ? super.conIdle(conId) : null;
+    if (!roomCreated()) return null;
+    if (conId != CON_BROADCAST) return super.conIdle(conId);
+    eachConnections(VirtualConnection::notifyIdle0);
+    return null;
   }
 }

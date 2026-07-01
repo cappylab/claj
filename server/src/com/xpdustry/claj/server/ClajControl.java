@@ -185,11 +185,10 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
       }else if (args.length == 0) {
         Log.info("Rooms: [total: @]", ClajVars.relay.rooms.size);
         ClajVars.relay.rooms.eachValue(r -> {
-          Log.info("&lk|&fr Room @: [@ client" + (r.clients.isEmpty() ? "" : "s") + ", type: @]", r.sid,
-                   r.clients.size + 1, r.type);
+          Log.info("&lk|&fr Room @: [@ client" + (r.isEmpty() ? "" : "s") + ", type: @]", r.sid,
+                   r.clients() + 1, r.type);
           Log.info("&lk| |&fr [H] Connection @&fr - @", r.host.sid, r.host.saddress);
-          for (ClajConnection c : r.clients.values())
-            Log.info("&lk| |&fr [C] Connection @&fr - @", c.sid, c.saddress);
+          r.clients.each(c -> Log.info("&lk| |&fr [C] Connection @&fr - @", c.sid, c.saddress));
           Log.info("&lk|&fr");
         });
 
@@ -197,9 +196,9 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
         Log.info("Rooms: [total: @]", ClajVars.relay.rooms.size);
         ClajVars.relay.rooms.eachValue(r -> {
           NetworkSpeed n = r.transferredPackets;
-          Log.info("&lk|&fr @: @ client" + (r.clients.isEmpty() ? "" : "s") +
+          Log.info("&lk|&fr @: @ client" + (r.isEmpty() ? "" : "s") +
                    " (@). @ p/s in, @ p/s out (@ in, @ out).",
-                   r.sid, r.clients.size + 1, Strings.formatDuration(Time.timeSinceMillis(r.createdAt), true),
+                   r.sid, r.clients() + 1, Strings.formatDuration(Time.timeSinceMillis(r.createdAt), true),
                    Mathf.ceil(n.uploadSpeed()), Mathf.ceil(n.downloadSpeed()), n.totalUpload(), n.totalDownload());
         });
 
@@ -518,7 +517,7 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
     CloseReason reason = Structs.find(CloseReason.all, r -> r.name().equalsIgnoreCase(arg));
     if (reason == null) {
       Log.err("No reason named '@' found. Must be one of: @", arg,
-              Strings.toSentence(Structs.generator(CloseReason.all), CloseReason::name));
+              Strings.toSentence(Structs.iterable(CloseReason.all), CloseReason::name));
     }
     return reason;
   }

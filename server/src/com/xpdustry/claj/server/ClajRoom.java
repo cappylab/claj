@@ -25,6 +25,7 @@ import arc.Events;
 import arc.math.Mathf;
 import arc.net.*;
 import arc.struct.IntMap;
+import arc.struct.Seq;
 import arc.util.Ratekeeper;
 import arc.util.Threads;
 import arc.util.Time;
@@ -38,8 +39,13 @@ import com.xpdustry.claj.server.util.NetworkSpeed;
 
 
 public class ClajRoom implements NetListener {
-  /** ID meaning that a room is not created. */
+  /** Id saying that no room is created. This should be handled as an invalid id. */
   public static final long UNCREATED_ROOM = 0;
+  /**
+   * Id meaning that that the connection is invalid, and used to broadcast packets to all clients. <br>
+   * This is used for disconnect, received and idle events, but not for connected one, as it makes no sense.
+   */
+  public static final int CON_BROADCAST = 0;
 
   // Packet caching
   private static final ThreadLocal<ConnectionJoinPacket> cjp = Threads.local(ConnectionJoinPacket::new);
@@ -59,8 +65,8 @@ public class ClajRoom implements NetListener {
   public final String sid;
   /** The host connection of this room. */
   public final ClajConnection host;
-  /** Using IntMap instead of Seq for faster search. */
-  public final IntMap<ClajConnection> clients = new IntMap<>();
+  public final IntMap<ClajConnection> clientsMap = new IntMap<>(16);
+  public final Seq<ClajConnection> clients = new Seq<>(false);
   /** For debugging, to know how many packets were transferred from a client to a host, and vice versa. */
   public final NetworkSpeed transferredPackets = new NetworkSpeed(8);
   /** Room state rate-limit. New states will simply be discarded. */
@@ -126,7 +132,7 @@ public class ClajRoom implements NetListener {
 
   /** Alerts the host of the client arrival. */
   public void connected(ClajConnection connection) {
-    if (closed || connection == null || clients.containsKey(connection.id)) return;
+    if (closed || connection == null || containsClient(connection)) return;
     if (!host.isConnected()) {
       close();
       return;
@@ -137,7 +143,8 @@ public class ClajRoom implements NetListener {
     p.addressHash = AddressUtil.hash(connection.connection);
     host.send(p);
 
-    clients.put(connection.id, connection);
+    clientsMap.put(connection.id, connection);
+    clients.add(connection);
     setRoom(connection);
     Events.fire(new ConnectionJoinedEvent(connection, this));
   }
@@ -164,7 +171,8 @@ public class ClajRoom implements NetListener {
     }
 
     removeRoom(connection);
-    ClajConnection con = clients.remove(connection.id);
+    clients.remove(connection);
+    ClajConnection con = clientsMap.remove(connection.id);
     if (con == null) return; // In case of the event is received twice
 
     ConnectionClosedPacket p = ccp.get();
@@ -181,7 +189,7 @@ public class ClajRoom implements NetListener {
     if (con != null) disconnectedQuietly(con, reason);
   }
 
-  /** Doesn't notify the room host about a disconnected client. */
+  /** Doesn't notify the room host about a disconnected client, but this does close it. */
   public void disconnectedQuietly(ClajConnection connection, DcReason reason) {
     if (closed || connection == null) return;
 
@@ -190,10 +198,31 @@ public class ClajRoom implements NetListener {
       close();
     } else {
       removeRoom(connection);
-      ClajConnection con = clients.remove(connection.id);
+      clients.remove(connection);
       // To avoid double fire if event is received twice
-      if (con != null) Events.fire(new ConnectionLeftEvent(connection, this));
+      if (clientsMap.remove(connection.id) != null)
+        Events.fire(new ConnectionLeftEvent(connection, this));
+      connection.close(reason == null ? DcReason.closed : reason);
     }
+  }
+
+  /** Close all connections of the room. */
+  public void disconnectAllClients(DcReason reason, boolean notify) {
+    //if (closed) return;
+
+    clients.each(c -> {
+      removeRoom(c);
+      Events.fire(new ConnectionLeftEvent(c, this));
+      c.close();
+    });
+    clients.clear();
+    clientsMap.clear();
+
+    if (!notify || !host.isConnected()) return;
+    ConnectionClosedPacket p = ccp.get();
+    p.conID = CON_BROADCAST;
+    p.reason = reason == null ? DcReason.closed : reason;
+    host.send(p);
   }
 
   /**
@@ -210,7 +239,7 @@ public class ClajRoom implements NetListener {
       if (object instanceof ConnectionPayloadPacket wrap)
         received(connection, wrap);
 
-    } else if (clients.containsKey(connection.getID())) {
+    } else if (containsClient(connection)) {
       if (object instanceof RawPacket raw)
         received(connection, raw);
     }
@@ -230,7 +259,18 @@ public class ClajRoom implements NetListener {
       wrap.raw.free();
       return;
     }
-    ClajConnection con = clients.get(wrap.conID);
+
+    // Broadcast send
+    if (wrap.conID == CON_BROADCAST) {
+      // Send buffer directly to avoid freeing it at first send
+      ByteBuffer data = wrap.raw.data();
+      clients.each(c -> c.send(data, wrap.isTCP));
+      transferredPackets.uploadMark();
+      wrap.raw.free();
+      return;
+    }
+
+    ClajConnection con = clientsMap.get(wrap.conID);
 
     if (con != null && con.isConnected()) {
       con.send(wrap.raw, wrap.isTCP);
@@ -258,8 +298,7 @@ public class ClajRoom implements NetListener {
    * framework packets are ignored and mindustry packets are saved as raw buffer.
    */
   public void received(Connection connection, RawPacket raw) {
-    if (closed || connection == null || !host.isConnected() ||
-        !clients.containsKey(connection.getID())) {
+    if (closed || connection == null || !host.isConnected() || !containsClient(connection)) {
       raw.free();
       return;
     }
@@ -285,7 +324,7 @@ public class ClajRoom implements NetListener {
     if (isHost(connection)) {
       // Ignore if this is the room host
 
-    } else if (host.isConnected() && clients.containsKey(connection.getID())) {
+    } else if (host.isConnected() && containsClient(connection)) {
       ConnectionIdlingPacket p = cip.get();
       p.conID = connection.getID();
       host.send(p);
@@ -303,6 +342,16 @@ public class ClajRoom implements NetListener {
    */
   public boolean allowsType(ClajType type) {
     return this.type == null || this.type.equals(type) || type == null && ClajConfig.acceptNoType.get();
+  }
+
+  /** @return whether this room have clients or not. */
+  public boolean isEmpty() {
+    return clientsMap.isEmpty();
+  }
+
+  /** @return the number of CLaJ clients in this room. */
+  public int clients() {
+    return clientsMap.size;
   }
 
   /** @return whether the room is created or not. */
@@ -360,11 +409,7 @@ public class ClajRoom implements NetListener {
 
     removeRoom(host);
     host.close();
-    for (ClajConnection c : clients.values()) {
-      removeRoom(c);
-      c.close();
-    }
-    clients.clear();
+    disconnectAllClients(DcReason.closed, false);
   }
 
   /** Sends a message to the host and clients. */
@@ -481,7 +526,7 @@ public class ClajRoom implements NetListener {
     p.roomId = id;
     p.isProtected = isProtected;
     p.type = type;
-    p.clients = clients.size;
+    p.clients = clientsMap.size;
     p.maxClients = maxClients;
     p.state = isPublic ? rawState : null;
     // Do not throw an error if buffer is above limit
@@ -505,7 +550,17 @@ public class ClajRoom implements NetListener {
 
   /** @return whether the connection is the room host or one of his client. */
   public boolean contains(Connection con) {
-    return !closed && con != null && (isHost(con) || clients.containsKey(con.getID()));
+    return !closed && con != null && (isHost(con) || containsClient(con));
+  }
+
+  /** @return whether the connection is in this room. */
+  public boolean containsClient(ClajConnection con) {
+    return containsClient(con.connection);
+  }
+
+  /** @return whether the connection is in this room. */
+  public boolean containsClient(Connection con) {
+    return clientsMap.containsKey(con.getID());
   }
 
 
