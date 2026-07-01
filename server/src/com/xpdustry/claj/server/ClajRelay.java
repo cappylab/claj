@@ -90,7 +90,7 @@ public class ClajRelay extends Server implements ApplicationListener {
 
     // Tweak to avoid {@link ClajRoom#CON_BROADCAST} from being selected as valid id.
     // But in theory, it doesn't really matter, as for an host, everything will work fine.
-    // And for a client, it will not be able to join to a room, and will have to reconnect.
+    // And for a client, it will not be able to join a room, and will have to reconnect.
     Reflect.<IntMap<Connection>>get(Server.class, this, "pendingConnections").put(ClajRoom.CON_BROADCAST, null);
 
     setDiscoveryHandler((_, r) -> {
@@ -209,6 +209,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     ClajRoom room = connection.currentRoom();
     if (removeClient(connection, reason)){
       info("Room @ closed because connection @ (the host) has disconnected.", room.sid, connection.sid);
+      return;
     } else if (room == null) return;
     if (room.isClosed()) Log.err("Failed to remove connection @ from room @. The room has been closed",
                                  connection.sid, room.sid);
@@ -268,10 +269,10 @@ public class ClajRelay extends Server implements ApplicationListener {
     // In case of
     if (room.isClosed()) {
       rejectRoomCreation(connection, CloseReason.error);
-      Log.err("Failed to create room @ requested by connection @.", room.sid, connection.sid);
+      Log.err("Failed to create room @ with type @ requested by connection @.", room.sid, room.type, connection.sid);
       return CloseReason.error;
     } else {
-      info("Room @ created by connection @.", room.sid, connection.sid);
+      info("Room @ created by connection @ with type @.", room.sid, connection.sid, room.type);
       return null;
     }
   }

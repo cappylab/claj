@@ -172,15 +172,17 @@ public class ClajRoom implements NetListener {
 
     removeRoom(connection);
     clients.remove(connection);
-    ClajConnection con = clientsMap.remove(connection.id);
-    if (con == null) return; // In case of the event is received twice
+    boolean removed = clientsMap.remove(connection.id) != null;
+    sendDisconnect(connection.id, reason);
+    // In case of the event is received twice
+    if (removed) Events.fire(new ConnectionLeftEvent(connection, this));
+  }
 
+  private void sendDisconnect(int conId, DcReason reason) {
     ConnectionClosedPacket p = ccp.get();
-    p.conID = connection.id;
+    p.conID = conId;
     p.reason = reason == null ? DcReason.closed : reason;
     host.send(p);
-
-    Events.fire(new ConnectionLeftEvent(connection, this));
   }
 
   /** Doesn't notify the room host about a disconnected client. */
@@ -219,10 +221,7 @@ public class ClajRoom implements NetListener {
     clientsMap.clear();
 
     if (!notify || !host.isConnected()) return;
-    ConnectionClosedPacket p = ccp.get();
-    p.conID = CON_BROADCAST;
-    p.reason = reason == null ? DcReason.closed : reason;
-    host.send(p);
+    sendDisconnect(CON_BROADCAST, reason);
   }
 
   /**
@@ -262,9 +261,9 @@ public class ClajRoom implements NetListener {
 
     // Broadcast send
     if (wrap.conID == CON_BROADCAST) {
-      // Send buffer directly to avoid freeing it at first send
-      ByteBuffer data = wrap.raw.data();
-      clients.each(c -> c.send(data, wrap.isTCP));
+      //TODO: send broadcast close error for next major version
+      wrap.raw.autoFree = false; // avoid freeing it at first send
+      clients.each(c -> c.send(wrap.raw, wrap.isTCP));
       transferredPackets.uploadMark();
       wrap.raw.free();
       return;
@@ -275,17 +274,13 @@ public class ClajRoom implements NetListener {
     if (con != null && con.isConnected()) {
       con.send(wrap.raw, wrap.isTCP);
       transferredPackets.uploadMark();
-      return;
 
     // Notify that this connection doesn't exist, this case normally never happen
     } else if (host.isConnected()) {
-      ConnectionClosedPacket p = ccp.get();
-      p.conID = wrap.conID;
-      p.reason = DcReason.error;
-      host.send(p);
+      sendDisconnect(wrap.conID, DcReason.error);
     }
 
-    wrap.raw.free();
+    wrap.raw.free(); // In case of
   }
 
   public void received(ClajConnection connection, ConnectionPayloadPacket wrap) {

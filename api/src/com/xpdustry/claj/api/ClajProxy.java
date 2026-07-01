@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 
 import arc.func.Cons;
 import arc.net.DcReason;
+import arc.util.Time;
 
 import com.xpdustry.claj.api.net.ProxyClient;
 import com.xpdustry.claj.api.net.VirtualConnection;
@@ -53,6 +54,14 @@ public class ClajProxy extends ProxyClient {
   protected Cons<CloseReason> roomClosed;
   protected long roomId = UNCREATED_ROOM;
   protected ClajLink link;
+
+  /** To check broadcast compatibility. */
+  private boolean testingBroadcast;
+  /**
+   * Broadcast check is done asynchronously after created the room. <br>
+   * This defines the timeout within to wait an error, in ms.
+   */
+  private long broadcastTestStart, broadcastTestTimeout = 1000;
 
   public ClajProxy(ClajProvider provider) {
     super(32768, 16384, new ClajClientSerializer(), provider::postTask);
@@ -108,6 +117,12 @@ public class ClajProxy extends ProxyClient {
     if (roomCreated != null) postTask(roomCreated, link);
     notifyConfiguration();
     if (isPublic) notifyRoomState();
+
+    // Check broadcast compatibility
+    if (!broadcastSupported || testingBroadcast) return;
+    broadcastTestStart = Time.millis();
+    testingBroadcast = true;
+    send(CON_BROADCAST, ByteBuffer.allocate(0), true);
   }
 
   /** This also resets room id and removes callbacks. */
@@ -120,6 +135,7 @@ public class ClajProxy extends ProxyClient {
     roomClosed = null;
     close();
     quietErrors = false;
+    testingBroadcast = false;
   }
 
   /** {@code 0} means no room created. */
@@ -147,6 +163,7 @@ public class ClajProxy extends ProxyClient {
   }
 
   public void requestRoomId() {
+    testingBroadcast = false;
     if (roomCreated()) return;
     sendTCP(makeRoomCreatePacket(provider.getVersion().majorVersion, provider.getType()));
   }
@@ -252,6 +269,11 @@ public class ClajProxy extends ProxyClient {
   protected VirtualConnection conDisconnected(int conId, DcReason reason) {
     if (!roomCreated()) return null;
     if (conId != CON_BROADCAST) return super.conDisconnected(conId, reason);
+    if (testingBroadcast && reason == DcReason.error &&
+        Time.timeSinceMillis(broadcastTestStart) < broadcastTestTimeout) {
+      testingBroadcast = broadcastSupported = false;
+      return null;
+    }
     eachConnections(c -> closeQuietly(c, reason));
     return null;
   }

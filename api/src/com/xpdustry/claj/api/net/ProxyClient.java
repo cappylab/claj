@@ -54,7 +54,7 @@ public abstract class ProxyClient extends Client {
   protected final Seq<VirtualConnection> connections = new Seq<>(false);
 
   protected NetListener conListener;
-  protected volatile boolean shutdown = true, starting, connecting;
+  protected volatile boolean shutdown = true, starting, connecting, closing;
   protected ClientReceiver receiver;
   protected long lastPing;
   protected Cons<Throwable> errorHandler;
@@ -70,11 +70,23 @@ public abstract class ProxyClient extends Client {
    * at the cost of increased tcp band for things initially designed to be less important.
    */
   public boolean forceTcp;
+  /**
+   * As packet broadcasting is not a protocol breaking change, some servers may not support it. <br>
+   * Server version should be checked and this field set to {@code false} if not supported. <br>
+   * This field is reset before connecting and after closing the proxy.
+   */
+  public boolean broadcastSupported = true;
 
   public ProxyClient(int writeBufferSize, int objectBufferSize, NetSerializer serialization,
                      Cons<Runnable> taskPoster) {
     super(writeBufferSize, objectBufferSize, serialization);
-    receiver = new ClientReceiver(this, taskPoster);
+    receiver = new ClientReceiver(this, taskPoster)/* {
+      @Override
+      public void received(Connection connection, Object object) {
+        arc.util.Log.info("Received packet @", object.getClass().getSimpleName());
+        super.received(connection, object);
+      }
+    }*/;
     writeBufferThreshold = (int)(writeBufferSize * 0.9f);
     setIdleThreshold(0.2f);
 
@@ -82,6 +94,7 @@ public abstract class ProxyClient extends Client {
       Throwable error = getLastProtocolError();
       if (error != null) errorHandler.get(error);
       clearPaquetQueue();
+      //also close virtual connections?
     });
   }
 
@@ -98,7 +111,8 @@ public abstract class ProxyClient extends Client {
   public void connect(int timeout, InetAddress host, int tcpPort, int udpPort) throws IOException {
     //TODO: add an option to prefer connecting only via tcp,
     //      as udp is not reliable for this kind of thing.
-    connecting = true;
+    connecting = broadcastSupported = true;
+    closing = false;
     connectTimeout = timeout;
     connectHost = host;
     connectTcpPort = tcpPort;
@@ -153,17 +167,17 @@ public abstract class ProxyClient extends Client {
   }
 
   @Override
-  public void close() {
-    closeAllConnections(DcReason.closed);
-    super.close();
-  }
-
-  @Override
   public void close(DcReason reason) {
-    clearPaquetQueue();
-    // We cannot communicate with the server anymore, so close all virtual connections
-    closeAllConnections(reason);
+    // To avoid a recursive call if it's sending last packet before cutting tcp connection.
+    // As in the case of a broken pipe, close() will be called again before removing connected state.
+    if (!closing) {
+      closing = true;
+      closeAllConnections(reason);
+    }
     super.close(reason);
+    clearPaquetQueue();
+    broadcastSupported = true;
+    closing = false;
   }
 
   public void closeAllConnections(DcReason reason) {
@@ -217,20 +231,29 @@ public abstract class ProxyClient extends Client {
   public int broadcast(Object object, boolean tcp) {
     if (object == null) throw new IllegalArgumentException("object cannot be null.");
     if (connections.isEmpty()) return 0; // no need to broadcast is there is no clients
+    if (!broadcastSupported) return connections.sum(c -> send(c, object, tcp));
+
     Object p = makeBroadcastWrapPacket(object, tcp);
     int written = tcp || forceTcp ? sendSafeTCP(p) : sendUDP(p);
     eachConnections(VirtualConnection::resetIdle);
     return written;
   }
 
-  public int send(VirtualConnection con, Object object, boolean tcp) {
+  public int send(int conId, Object object, boolean tcp) {
     if (object == null) throw new IllegalArgumentException("object cannot be null.");
-    Object p = makeConWrapPacket(con.getID(), object, tcp);
-    int written = tcp || forceTcp ? sendSafeTCP(p) : sendUDP(p);
+
+    Object p = makeConWrapPacket(conId, object, tcp);
+    return tcp || forceTcp ? sendSafeTCP(p) : sendUDP(p);
+  }
+
+  public int send(VirtualConnection con, Object object, boolean tcp) {
+    int written = send(con.getID(), object, tcp);
     con.resetIdle();
     return written;
   }
 
+
+  //FIXME: dangerous as everything assumes that packets are serialized in-place.
   /**
    * Because all {@link VirtualConnection}s shares the same tcp buffer, it can be filled quickly. <br>
    * This tries to queue packets when needed, to avoid overflows.
