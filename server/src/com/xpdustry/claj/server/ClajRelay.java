@@ -371,7 +371,7 @@ public class ClajRelay extends Server implements ApplicationListener {
       return null;
     } else {
       removeQueue(connection);
-      if (isRequest) rejectRoomJoin(connection, room, roomId, RejectReason.error);
+      if (isRequest) rejectRoomJoin(connection, room, RejectReason.error);
       else connection.close(DcReason.error);
       Log.err("Failed to add connection @ to room @. The room has been closed.", connection.sid, room.sid);
       return RejectReason.error;
@@ -905,6 +905,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   public void rejectObsoleteClient(ClajConnection connection) {
     if (connection == null) return;
     if (ClajConfig.warnDeprecated.get()) {
+      // Mmmm yea, mindustry related...
       connection.send("[scarlet][[CLaJ Server]:[] Your CLaJ version is obsolete! "
                     + "Please upgrade it by installing the 'claj' mod, in the mod browser.");
       Core.app.post(() -> {
@@ -946,11 +947,9 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   public void rejectRoomCreation(ClajConnection connection, CloseReason reason) {
     if (connection == null) return;
-    RoomClosedPacket p = new RoomClosedPacket();
-    p.reason = reason;
-    connection.send(p);
+    ClajRoom.sendRoomClosed(connection, reason);
     Events.fire(new RoomCreationRejectedEvent(connection, reason));
-    connection.close();
+    connection.close(); // keep that as compatibility for old versions
   }
 
   public void rejectRoomJoin(ClajConnection connection, ClajRoom room, RejectReason reason) {
@@ -958,27 +957,22 @@ public class ClajRelay extends Server implements ApplicationListener {
   }
   protected void rejectRoomJoin(ClajConnection connection, ClajRoom room, long roomId, RejectReason reason) {
     if (connection == null) return;
-    RoomJoinDeniedPacket p = new RoomJoinDeniedPacket();
-    p.roomId = room == null ? roomId : room.id;
-    p.reason = reason;
-    connection.send(p);
+    ClajRoom.sendConnectionRejected(connection, room == null ? roomId : room.id, reason);
     Events.fire(new ConnectionJoinRejectedEvent(connection, room, reason));
-    connection.close();
+    connection.close(); //close?
   }
 
   public void acceptJoinRequest(ClajConnection connection, ClajRoom room) {
     if (connection == null) return;
-    RoomJoinAcceptedPacket p = new RoomJoinAcceptedPacket();
-    p.roomId = room.id;
-    connection.send(p);
+    ClajRoom.sendConnectionAccepted(connection, room);
     Events.fire(new ConnectionPreJoinEvent(connection, room));
   }
 
   public void rejectRoomInfo(ClajConnection connection, ClajRoom room, boolean rateLimited) {
     if (connection == null) return;
-    connection.send(RoomInfoDeniedPacket.instance);
+    ClajRoom.sendRoomInfoRejected(connection);
     Events.fire(new RoomInfoRejectedEvent(connection, room, rateLimited));
-    connection.close();
+    //connection.close(); // can be annoying
   }
 
   public void rejectRoomList(ClajConnection connection, ClajType type, boolean rateLimited) {

@@ -197,15 +197,21 @@ public class ClajProxy extends ProxyClient {
     send(makeRoomStatePacket(roomId, state));
   }
 
+  /** Packet ids for optimization. */
+  private static final byte
+      rsp = ClajNet.getId(RoomStatePacket.class),           rcp = ClajNet.getId(RoomConfigPacket.class),
+      rrp = ClajNet.getId(RoomCreationRequestPacket.class), cpp = ClajNet.getId(ConnectionPayloadPacket.class),
+      ccp = ClajNet.getId(ConnectionClosedPacket.class);
+
   protected Packet makeRoomStatePacket(long roomId, ByteBuffer state) {
-    RoomStatePacket p = ClajNet.newLocalPacket(RoomStatePacket.class);
+    RoomStatePacket p = ClajNet.newLocalPacket(rsp);
     p.state = state;
     return p;
   }
 
   protected Packet makeRoomConfigPacket(boolean isPublic, boolean isProtected, short password,
                                         boolean requestState) {
-    RoomConfigPacket p = ClajNet.newLocalPacket(RoomConfigPacket.class);
+    RoomConfigPacket p = ClajNet.newLocalPacket(rcp);
     p.isPublic = isPublic;
     p.isProtected = isProtected;
     p.password = password;
@@ -214,7 +220,7 @@ public class ClajProxy extends ProxyClient {
   }
 
   protected Packet makeRoomCreatePacket(int version, ClajType type) {
-    RoomCreationRequestPacket p = ClajNet.newLocalPacket(RoomCreationRequestPacket.class);
+    RoomCreationRequestPacket p = ClajNet.newLocalPacket(rrp);
     p.version = version;
     p.type = type;
     return p;
@@ -237,7 +243,7 @@ public class ClajProxy extends ProxyClient {
   @Override
   protected Packet makeConWrapPacket(int conId, Object object, boolean tcp) {
     // In theory a client can run multiple proxies in parallel, so keep that safe
-    ConnectionPayloadPacket p = ClajNet.newLocalPacket(ConnectionPayloadPacket.class, false);
+    ConnectionPayloadPacket p = ClajNet.newLocalPacket(cpp, false);
     p.conID = conId;
     p.isTCP = tcp;
     p.object = object;
@@ -247,7 +253,7 @@ public class ClajProxy extends ProxyClient {
   @Override
   protected Packet makeConClosePacket(int conId, DcReason reason) {
     // In theory a client can run multiple proxies in parallel, so keep that safe
-    ConnectionClosedPacket p = ClajNet.newLocalPacket(ConnectionClosedPacket.class, false);
+    ConnectionClosedPacket p = ClajNet.newLocalPacket(ccp, false);
     p.conID = conId;
     p.reason = reason;
     return p;

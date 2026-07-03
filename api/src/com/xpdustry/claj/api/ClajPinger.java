@@ -448,20 +448,25 @@ public class ClajPinger extends Client {
     sendUDP(FrameworkMessage.discoverHost);
   }
 
+  /** Packet ids for optimization */
+  private static final byte
+      rip = ClajNet.getId(RoomInfoRequestPacket.class), rlp = ClajNet.getId(RoomListRequestPacket.class),
+      rjp = ClajNet.getId(RoomJoinRequestPacket.class);
+
   protected void requestRoomInfo(long roomId) {
-    RoomInfoRequestPacket p = ClajNet.newLocalPacket(RoomInfoRequestPacket.class);
+    RoomInfoRequestPacket p = ClajNet.newLocalPacket(rip);
     p.roomId = roomId;
     sendTCP(p);
   }
 
   protected void requestRoomList() {
-    RoomListRequestPacket p = ClajNet.newLocalPacket(RoomListRequestPacket.class);
+    RoomListRequestPacket p = ClajNet.newLocalPacket(rlp);
     p.type = provider.getType();
     sendTCP(p);
   }
 
   protected void requestRoomJoin(long roomId, boolean withPassword, short password) {
-    RoomJoinRequestPacket p = ClajNet.newLocalPacket(RoomJoinRequestPacket.class);
+    RoomJoinRequestPacket p = ClajNet.newLocalPacket(rjp);
     p.roomId = roomId;
     p.withPassword = withPassword && password != NO_PASSWORD;
     p.password = password;

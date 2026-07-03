@@ -35,7 +35,7 @@ public class FastThreadLocal<T> extends ThreadLocal<T> {
       AtomicLongFieldUpdater.newUpdater(FastThreadLocal.class, "last");
   private static final long EMPTY = -1L, UPDATING = -2L;
 
-  private volatile long last;
+  private volatile long last = EMPTY;
   private volatile T data;
   private final Prov<T> supplier;
 

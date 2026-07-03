@@ -39,7 +39,7 @@ public class ClajPackets {
     ClajNet.register(RoomJoinRequestPacket::new);
     ClajNet.register(RoomJoinAcceptedPacket::new);
     ClajNet.register(RoomJoinDeniedPacket::new);
-    ClajNet.register(RoomLinkPacket::new);
+    ClajNet.register(RoomLinkPacket::new); //TODO: rename to RoomCreatedPacket and move it to RoomClosureRequestPacket
     ClajNet.register(RoomConfigPacket::new);
     ClajNet.register(RoomStateRequestPacket::new);
     ClajNet.register(RoomStatePacket::new);

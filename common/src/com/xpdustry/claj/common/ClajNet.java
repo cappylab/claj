@@ -29,7 +29,6 @@ import com.xpdustry.claj.common.packets.Packet;
 import com.xpdustry.claj.common.util.FastThreadLocal;
 
 
-@SuppressWarnings("unchecked")
 public class ClajNet {
   /** Identifier for framework messages. */
   public static final byte frameworkId = -2;
@@ -41,12 +40,10 @@ public class ClajNet {
   /** Maximum number of packet that can be registered. */
   public static final int MAX_PACKETS = 1<<Byte.SIZE;
 
-  protected static final ObjectIntMap<Class<?>> packetIds = new ObjectIntMap<>(16);
-  protected static final IntMap<Prov<?>> packets = new IntMap<>(16);
-  protected static final IntMap<ThreadLocal<?>> packetLocals = new IntMap<>(8);
-  protected static final ObjectMap<Class<?>, ThreadLocal<?>> classPacketLocals = new ObjectMap<>(8);
-  protected static final IntMap<Pool<?>> packetPools = new IntMap<>(8);
-  protected static final ObjectMap<Class<?>, Pool<?>> classPacketPools = new ObjectMap<>(8);
+  private static final ObjectIntMap<Class<?>> packetIds = new ObjectIntMap<>(16);
+  private static final Seq<Prov<?>> packets = new Seq<>();
+  private static final Seq<ThreadLocal<?>> packetLocals = new Seq<>();
+  private static final Seq<Pool<?>> packetPools = new Seq<>();
 
   /**
    * Registers a new packet type for serialization. Ignores if already registered.
@@ -55,25 +52,35 @@ public class ClajNet {
   public static <T extends Packet> void register(Prov<T> cons) {
     Class<?> type = cons.get().getClass();
     if (packetIds.containsKey(type)) return;
-    int id = packetIds.size;
-    if (id >= MAX_PACKETS) throw new IllegalArgumentException("Packets limit reached");
-    packetIds.put(type, id);
-    packets.put(id, cons);
+    if (packets.size >= MAX_PACKETS) throw new IllegalArgumentException("Packets limit reached");
+    packetIds.put(type, packets.size);
+    packets.add(cons);
+    packetLocals.add((ThreadLocal<?>)null);
+    packetPools.add((Pool<?>)null);
+  }
+
+  protected static int getIndex(Class<? extends Packet> packet) {
+    int i = packetIds.get(packet, -1);
+    if (i == -1 || i >= packets.size) throw new ArcNetException("Unknown packet type: " + packet);
+    return i;
+  }
+
+  protected static int getIndex(byte id) {
+    int i = id & 0xff;
+    if (i >= packets.size) throw new ArcNetException("Unknown packet id: " + id);
+    return i;
+  }
+
+  protected static Prov<?> getPacket(byte id) {
+    return packets.get(getIndex(id));
   }
 
   public static byte getId(Packet packet) { return getId(packet.getClass()); }
   public static byte getId(Class<? extends Packet> packet) {
-    int id = packetIds.get(packet, -1);
-    if(id == -1) throw new ArcNetException("Unknown packet type: " + packet);
-    return (byte)id;
+    return (byte)getIndex(packet);
   }
 
-  protected static Prov<?> getPacket(byte id) {
-    Prov<?> packet = packets.get(id);
-    if (packet == null) throw new ArcNetException("Unknown packet id: " + id);
-    return packet;
-  }
-
+  @SuppressWarnings("unchecked")
   public static <T extends Packet> T newPacket(byte id) {
     return (T)getPacket(id).get();
   }
@@ -81,17 +88,10 @@ public class ClajNet {
   public static <T extends Packet> T newLocalPacket(byte id) { return newLocalPacket(id, true); }
   /**
    * For use with read, if packets are processed on the same thread.
-   * <p>
-   * The {@code fast} argument determines whether to use an implementation with a same thread use (MRU) fast path.
-   * Default is {@code true}. <br>
-   * You would set it to {@code false} only if you think the packet is likely to be frequently used
-   * by multiple threads. As the fast path is only faster when a single thread is requesting it intensively. <br>
-   * The argument is only taken into account during the first call for a given packet.
+   * @see #newLocalPacket(Class, boolean)
    */
   public static <T extends Packet> T newLocalPacket(byte id, boolean fast) {
-    ThreadLocal<?> local = packetLocals.get(id);
-    if (local == null) local = registerLocal(id, null, fast);
-    return (T)local.get();
+    return newLocalPacket(getIndex(id), fast);
   }
 
   public static <T extends Packet> T newLocalPacket(Class<T> packet) { return newLocalPacket(packet, true); }
@@ -105,58 +105,55 @@ public class ClajNet {
    * The argument is only taken into account during the first call for a given packet.
    */
   public static <T extends Packet> T newLocalPacket(Class<T> packet, boolean fast) {
-    ThreadLocal<?> local = classPacketLocals.get(packet);
-    if (local == null) local = registerLocal(getId(packet), packet, fast);
+    return newLocalPacket(getIndex(packet), fast);
+  }
+
+  @SuppressWarnings("unchecked")
+  protected static <T extends Packet> T newLocalPacket(int index, boolean fast) {
+    ThreadLocal<?> local = packetLocals.get(index);
+    if (local == null) {
+      Prov<?> prov = getPacket(id);
+      local = fast ? FastThreadLocal.with(prov): Threads.local(prov);
+      packetLocals.set(index, local);
+    }
     return (T)local.get();
   }
 
-  protected static ThreadLocal<?> registerLocal(byte id, Class<?> packet, boolean fast) {
-    synchronized (packetLocals) {
-      synchronized (classPacketLocals) {
-        ThreadLocal<?> local;
-        if ((local = packetLocals.get(id)) == null) { // safe check
-          Prov<?> prov = getPacket(id);
-          local = fast ? FastThreadLocal.with(prov): Threads.local(prov);
-          packetLocals.put(id, local);
-          classPacketLocals.put(packet == null ? prov.get().getClass() : packet, local);
-        }
-        return local;
-      }
-    }
-  }
 
   /** For use with read, as packets are more likely to be processed on another thread. */
   public static <T extends Packet> T newPooledPacket(byte id) {
-    Pool<?> pool = packetPools.get(id);
-    if (pool == null) pool = registerPool(id, null);
-    return (T)pool.obtain();
+    return newPooledPacket(getIndex(id));
   }
 
   /** For use with send, if packets are serialized on another thread, or for other usages. */
   public static <T extends Packet> T newPooledPacket(Class<T> packet) {
-    Pool<?> pool = classPacketPools.get(packet);
-    if (pool == null) pool = registerPool(getId(packet), packet);
+    return newPooledPacket(getIndex(packet));
+  }
+
+  @SuppressWarnings("unchecked")
+  protected static <T extends Packet> T newPooledPacket(int index) {
+    Pool<?> pool = packetPools.get(index);
+    if (pool == null) {
+      Prov<?> prov = getPacket(id);
+      pool = new Pool<>(8, 128) { protected Object newObject() { return prov.get(); } };
+      packetPools.set(index, pool);
+    }
     return (T)pool.obtain();
   }
 
   /** Never free a packet get from {@link #newLocalPacket}!! */
   public static <T extends Packet> void freePooledPacket(T packet) {
-    Pool<T> pool = (Pool<T>)classPacketPools.get(packet.getClass());
-    if (pool != null) pool.free(packet);
+    freePooledPacket(getIndex(packet.getClass()), packet);
   }
 
-  protected static Pool<?> registerPool(byte id, Class<?> packet) {
-    synchronized (packetPools) {
-      synchronized (classPacketPools) {
-        Pool<?> pool;
-        if ((pool = packetPools.get(id)) == null) { // safe check
-          Prov<?> prov = getPacket(id);
-          pool = new Pool<>(8, 128) { protected Object newObject() { return prov.get(); } };
-          packetPools.put(id, pool);
-          classPacketPools.put(packet == null ? prov.get().getClass() : packet, pool);
-        }
-        return pool;
-      }
-    }
+  /** Never free a packet get from {@link #newLocalPacket}!! */
+  public static <T extends Packet> void freePooledPacket(byte id, T packet) {
+    freePooledPacket(getIndex(id), packet);
+  }
+
+  @SuppressWarnings("unchecked")
+  protected static <T extends Packet> void freePooledPacket(int index, T packet) {
+    Pool<T> pool = (Pool<T>)packetPools.get(index);
+    if (pool != null) pool.free(packet);
   }
 }
