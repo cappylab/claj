@@ -40,9 +40,7 @@ public class NetworkSpeed {
     downloadAccum = new AtomicLong();
     totalUpload = new AtomicLong();
     totalDownload = new AtomicLong();
-    long now = Time.nanos();
-    lastUpload = now;
-    lastDownload = now;
+    lastUpload = lastDownload = Time.nanos();
   }
 
   public void downloadMark() { downloadMark(1); }

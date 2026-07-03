@@ -65,13 +65,6 @@ public class ClajRelay extends Server implements ApplicationListener {
   protected int clientsInRooms;
 
   // Caches
-  /**
-   * Keeps a cache of packets received from connections that are not yet in a room. (queue of 2)<br>
-   * Sometimes the join packet comes after other packets, and can lead to a client-side error/timeout.
-   */
-  private final IntMap<RawPacket[]> packetQueue = new IntMap<>();
-  /** Size of the packet queue. */
-  private final int packetQueueSize = 2, packetSizeInQueue = 1 << 13;
   /** As server version will not change at runtime, cache the serialized packet to avoid re-serialization. */
   private ByteBuffer versionBuff;
   /** Empty room list to send to client requesting no type or a not found one. */
@@ -122,9 +115,22 @@ public class ClajRelay extends Server implements ApplicationListener {
     receiver.handle(RoomListRequestPacket.class, (c, p) -> onListRequest(toClajCon(c), p.type));
 
     receiver.handle(ConnectionClosedPacket.class, (c, p) -> onConClose(toClajCon(c), p.conID, p.reason));
+
+    addListener(new NetListener() {
+      @Override
+      public void received(Connection connection, Object object) {
+        switch (object) {
+          case ConnectionPayloadPacket payload -> onHostPacket(toClajCon(connection), payload);
+          case RawPacket raw -> onConPacket(toClajCon(connection), raw);
+          default -> {}
+        }
+      }
+    });
+/*
     //TODO: keep these two on the network thread for optimization?
     receiver.handle(ConnectionPayloadPacket.class, (c, p) -> onHostPacket(toClajCon(c), p));
     receiver.handle(RawPacket.class, (c, p) -> onConPacket(toClajCon(c), p));
+*/
   }
 
   // region logging
@@ -204,7 +210,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     if (connection == null) return;
     Events.fire(new ClientDisonnectedEvent(connection, reason));
     connections.remove(connection.id);
-    removeQueue(connection);
+    connection.clearQueue();
 
     ClajRoom room = connection.currentRoom();
     if (removeClient(connection, reason)){
@@ -367,10 +373,10 @@ public class ClajRelay extends Server implements ApplicationListener {
 
     if (addClient(room, connection)) {
       info("Connection @ joined the room @. (type: @)", connection.sid, room.sid, type);
-      handleQueue(connection, room);
+      connection.handleQueue();
       return null;
     } else {
-      removeQueue(connection);
+      connection.clearQueue();
       if (isRequest) rejectRoomJoin(connection, room, RejectReason.error);
       else connection.close(DcReason.error);
       Log.err("Failed to add connection @ to room @. The room has been closed.", connection.sid, room.sid);
@@ -523,6 +529,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     if (connection == null) return false;
     ClajRoom room = connection.currentRoom();
     if (room == null) return false;
+    connection.handleQueue();
     room.received(connection, packet);
     return true;
   }
@@ -531,7 +538,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     if (connection == null) return;
     ClajRoom room = connection.currentRoom();
     if (room != null) room.received(connection, packet);
-    else addQueue(connection, packet);
+    else connection.addQueue(packet);
   }
 
   // end region
@@ -624,12 +631,8 @@ public class ClajRelay extends Server implements ApplicationListener {
 
   public void closeRooms() { closeRooms(CloseReason.serverClosed); }
   public void closeRooms(CloseReason reason) {
-    for (RawPacket[] queue : packetQueue.values()) {
-      for (RawPacket element : queue) {
-        if (element != null) element.free();
-      }
-    }
-    packetQueue.clear();
+    for (ClajConnection con : connections.values()) con.clearQueue();
+    connections.clear();
     routines.clearCaches((c, r) -> rejectRoomInfo(c, getRoom(r), false));
     rooms.eachValue(r -> r.close(reason));
     rooms.clear();
@@ -845,57 +848,6 @@ public class ClajRelay extends Server implements ApplicationListener {
       else rejectRateLimitedClient(con);
     }
     return !isRated;
-  }
-
-  public boolean addQueue(ClajConnection con, RawPacket packet) {
-    return addQueue(con.connection, packet);
-  }
-  /** @return whether a slot was found or not. */
-  public boolean addQueue(Connection con, RawPacket packet) {
-    if (packet.data().remaining() >= packetSizeInQueue) {
-      packet.free();
-      removeQueue(con);
-      con.close(DcReason.error);
-      Log.warn("Connection @ kicked for sending too big packets in the queue.", AddressUtil.encodeId(con));
-      return false;
-    }
-
-    RawPacket[] queue = packetQueue.get(con.getID(), () -> new RawPacket[packetQueueSize]);
-    for (int i=0; i<queue.length; i++) {
-      if (queue[i] == null) {
-        queue[i] = packet;
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /** @return whether a queue was removed or not. */
-  public boolean removeQueue(ClajConnection con) {
-    return removeQueue(con.connection);
-  }
-
-  /** @return whether a queue was removed or not. */
-  public boolean removeQueue(Connection con) {
-    RawPacket[] queue = packetQueue.remove(con.getID());
-    if (queue == null) return false;
-    for (RawPacket element : queue) {
-      if (element != null) element.free();
-    }
-    return true;
-  }
-
-  /** @return whether the queue has been send to the room host, or not (because no packet was queued). */
-  public boolean handleQueue(ClajConnection con, ClajRoom room) {
-    RawPacket[] queue = packetQueue.remove(con.id);
-    if (queue != null) {
-      Log.debug("Sending queued packets of connection @ to room host.", con.sid);
-      for (RawPacket element : queue) {
-        if (element != null) room.received(con.connection, element);
-      }
-      return true;
-    }
-    return false;
   }
 
   // end region

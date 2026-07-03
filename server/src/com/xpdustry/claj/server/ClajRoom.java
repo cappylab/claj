@@ -234,6 +234,8 @@ public class ClajRoom implements NetListener {
   /**
    * Unwraps the packet and sends it to the corresponding connection. <br>
    * This will notify the host if the connection is not found.
+   * <p>
+   * Please note that this method is mainly called from network thread.
    */
   public void received(Connection connection, ConnectionPayloadPacket wrap) {
     if (closed || !isHost(connection)) {
@@ -245,7 +247,11 @@ public class ClajRoom implements NetListener {
     if (wrap.conID == CON_BROADCAST) {
       //TODO: send broadcast close error for next major version
       wrap.raw.autoFree = false; // avoid freeing it at first send
-      clients.each(c -> c.send(wrap.raw, wrap.isTCP));
+      // Crappy but will avoid an NPE when a client is disconnecting
+      Object[] cons = clients.items;
+      for (int i=0, n=clients.size; i<n; i++) {
+        if (cons[i] != null) ((ClajConnection)cons[i]).send(wrap.raw, wrap.isTCP);
+      }
       transferredPackets.uploadMark();
       wrap.raw.free();
       return;
@@ -266,13 +272,15 @@ public class ClajRoom implements NetListener {
   }
 
   public void received(ClajConnection connection, ConnectionPayloadPacket wrap) {
-    if (connection == null) return;
-    received(connection.connection, wrap);
+    if (connection != null) received(connection.connection, wrap);
+    else wrap.raw.free();
   }
 
   /**
    * We never send claj packets to anyone other than the room host,
    * framework packets are ignored and mindustry packets are saved as raw buffer.
+   * <p>
+   * Please note that this method is mainly called from network thread.
    */
   public void received(Connection connection, RawPacket raw) {
     if (closed || connection == null || !host.isConnected() || isHost(connection) ||
@@ -286,8 +294,8 @@ public class ClajRoom implements NetListener {
   }
 
   public void received(ClajConnection connection, RawPacket raw) {
-    if (connection == null) return;
-    received(connection.connection, raw);
+    if (connection != null) received(connection.connection, raw);
+    else raw.free();
   }
 
   /** Notifies the host of an idle connection. */

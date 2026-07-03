@@ -29,6 +29,7 @@ import arc.util.Ratekeeper;
 import com.xpdustry.claj.common.net.stream.PreparedStream;
 import com.xpdustry.claj.common.net.stream.StreamSender;
 import com.xpdustry.claj.common.packets.Packet;
+import com.xpdustry.claj.common.packets.RawPacket;
 import com.xpdustry.claj.common.util.AddressUtil;
 
 
@@ -41,7 +42,7 @@ public class ClajConnection {
   public final String sid;
   public final Ratekeeper packetRate;
 
-  protected ClajRoom room;
+  protected volatile ClajRoom room;
 
   public ClajConnection(Connection connection) {
     if (connection == null) throw new NullPointerException("connection is null");
@@ -92,5 +93,75 @@ public class ClajConnection {
   public void close() { close(DcReason.closed); }
   public void close(DcReason reason) {
     connection.close(reason);
+  }
+
+
+  //try to get rid of this...
+  /**
+   * Keeps a cache of packets received from connections that are not yet in a room. (queue of 2)<br>
+   * Sometimes the join packet comes after other packets, and can lead to a client-side error/timeout.
+   */
+  private volatile RawPacket[] waitingQueue;
+  private static final int packetQueueSize = 2, packetSizeInQueue = 1 << 13;
+  private final Object queueLock = new Object();
+
+  /** @return whether a slot was found or not. */
+  public boolean addQueue(RawPacket packet) {
+    if (packet.data().remaining() >= packetSizeInQueue) {
+      packet.free();
+      clearQueue();
+      close(DcReason.error);
+      Log.warn("Connection @ kicked for sending too big packets in the queue.", sid);
+      return false;
+    }
+
+    synchronized (queueLock) {
+      if (waitingQueue == null) waitingQueue = new RawPacket[packetQueueSize];
+      for (int i=0; i<waitingQueue.length; i++) {
+        if (waitingQueue[i] != null) continue;
+        waitingQueue[i] = packet;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public void clearQueue() {
+    if (waitingQueue == null) return;
+
+    RawPacket[] queue;
+    synchronized (queueLock) {
+      if (waitingQueue == null) return;
+      queue = waitingQueue;
+      waitingQueue = null;
+    }
+
+    for (RawPacket element : queue) {
+      if (element != null) element.free();
+    }
+  }
+
+  /** @return whether the queue has been sent to the room host, or not,
+   *          because no packet was queued or connection is not in a room. */
+  public boolean handleQueue() {
+    if (waitingQueue == null || room == null) return false;
+
+    // Needed because handling can be done on network and main thread
+    RawPacket[] queue;
+    synchronized (queueLock) {
+      if (waitingQueue == null) return false;
+      queue = waitingQueue;
+      waitingQueue = null;
+    }
+
+    Log.debug("Sending queued packets of connection @ to room host.", sid);
+    for (RawPacket element : queue) {
+      if (element != null) room.received(this, element);
+    }
+    return true;
+  }
+
+  public boolean hasQueue() {
+    return waitingQueue != null;
   }
 }
