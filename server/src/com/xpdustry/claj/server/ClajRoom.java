@@ -27,9 +27,9 @@ import arc.net.*;
 import arc.struct.IntMap;
 import arc.struct.Seq;
 import arc.util.Ratekeeper;
-import arc.util.Threads;
 import arc.util.Time;
 
+import com.xpdustry.claj.common.ClajNet;
 import com.xpdustry.claj.common.packets.*;
 import com.xpdustry.claj.common.status.*;
 import com.xpdustry.claj.common.util.AddressUtil;
@@ -46,13 +46,6 @@ public class ClajRoom implements NetListener {
    * This is used for disconnect, received and idle events, but not for connected one, as it makes no sense.
    */
   public static final int CON_BROADCAST = 0;
-
-  // Packet caching
-  private static final ThreadLocal<ConnectionJoinPacket> cjp = Threads.local(ConnectionJoinPacket::new);
-  private static final ThreadLocal<ConnectionClosedPacket> ccp = Threads.local(ConnectionClosedPacket::new);
-  private static final ThreadLocal<ConnectionPayloadPacket> cwp = Threads.local(ConnectionPayloadPacket::new);
-  private static final ThreadLocal<ConnectionIdlingPacket> cip = Threads.local(ConnectionIdlingPacket::new);
-
 
   protected boolean created, closed;
 
@@ -138,7 +131,7 @@ public class ClajRoom implements NetListener {
       return;
     }
 
-    ConnectionJoinPacket p = cjp.get();
+    ConnectionJoinPacket p = ClajNet.newLocalPacket(ConnectionJoinPacket.class);
     p.conID = connection.id;
     p.addressHash = AddressUtil.hash(connection.connection);
     host.send(p);
@@ -179,7 +172,7 @@ public class ClajRoom implements NetListener {
   }
 
   private void sendDisconnect(int conId, DcReason reason) {
-    ConnectionClosedPacket p = ccp.get();
+    ConnectionClosedPacket p = ClajNet.newLocalPacket(ConnectionClosedPacket.class);
     p.conID = conId;
     p.reason = reason == null ? DcReason.closed : reason;
     host.send(p);
@@ -299,7 +292,7 @@ public class ClajRoom implements NetListener {
     }
 
     //NOTE: ai slop is saying me this can lead to a buffer corruption...
-    ConnectionPayloadPacket p = cwp.get();
+    ConnectionPayloadPacket p = ClajNet.newLocalPacket(ConnectionPayloadPacket.class);
     p.conID = connection.getID();
     p.raw = raw;
     host.send(p);
@@ -320,7 +313,7 @@ public class ClajRoom implements NetListener {
       // Ignore if this is the room host
 
     } else if (host.isConnected() && containsClient(connection)) {
-      ConnectionIdlingPacket p = cip.get();
+      ConnectionIdlingPacket p = ClajNet.newLocalPacket(ConnectionIdlingPacket.class);
       p.conID = connection.getID();
       host.send(p);
     }
@@ -373,7 +366,7 @@ public class ClajRoom implements NetListener {
 
     setRoom(host);
 
-    RoomLinkPacket p = new RoomLinkPacket();
+    RoomLinkPacket p = ClajNet.newLocalPacket(RoomLinkPacket.class);
     p.roomId = id;
     host.send(p);
 
@@ -395,7 +388,7 @@ public class ClajRoom implements NetListener {
 
     if (host.isConnected()) {
       // Notify the reason to the host
-      RoomClosedPacket p = new RoomClosedPacket();
+      RoomClosedPacket p = ClajNet.newLocalPacket(RoomClosedPacket.class);
       p.reason = reason;
       host.send(p);
     }
@@ -412,7 +405,7 @@ public class ClajRoom implements NetListener {
     if (closed) return;
 
     // Just send to host, it will re-send it properly to all clients
-    ClajTextMessagePacket p = new ClajTextMessagePacket();
+    ClajTextMessagePacket p = ClajNet.newLocalPacket(ClajTextMessagePacket.class);
     p.message = text;
     host.send(p);
   }
@@ -422,7 +415,7 @@ public class ClajRoom implements NetListener {
     if (closed) return;
 
     // Useless to cache packet here.
-    ClajMessagePacket p = new ClajMessagePacket();
+    ClajMessagePacket p = ClajNet.newLocalPacket(ClajMessagePacket.class);
     p.message = message;
     host.send(p);
   }
@@ -432,7 +425,7 @@ public class ClajRoom implements NetListener {
     if (closed) return;
 
     // Useless to cache packet here.
-    ClajPopupPacket p = new ClajPopupPacket();
+    ClajPopupPacket p = ClajNet.newLocalPacket(ClajPopupPacket.class);
     p.message = text;
     host.send(p);
   }
@@ -517,7 +510,7 @@ public class ClajRoom implements NetListener {
   public void sendRoomState(ClajConnection connection) {
     if (closed) return;
 
-    RoomInfoPacket p = new RoomInfoPacket();
+    RoomInfoPacket p = ClajNet.newLocalPacket(RoomInfoPacket.class);
     p.roomId = id;
     p.isProtected = isProtected;
     p.type = type;

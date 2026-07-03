@@ -79,8 +79,8 @@ public class MindustryClajProvider implements ClajProvider {
   @Override
   public void handleProxyError(ClajProxy proxy, Throwable error) {
     if (proxy.roomCreated()) {
-      Vars.ui.showException("@claj.room.error", error);
       proxy.quietErrors = true;
+      postTask(() -> Vars.ui.showException("@claj.room.error", error));
     }
     Log.err("Error while hosting the room", error);
   }
@@ -107,7 +107,8 @@ public class MindustryClajProvider implements ClajProvider {
 
   @Override
   public ByteBuffer writeRoomState(ClajProxy proxy) {
-    return NetworkIO.writeServerData();
+    //thread-safe to do that?
+    return (ByteBuffer)NetworkIO.writeServerData().flip();
   }
 
   @SuppressWarnings("unchecked")

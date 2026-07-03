@@ -36,7 +36,7 @@ public class RoomInfoPacket extends RoomStatePacket {
   protected void readImpl(ByteBufferInput read) {
     roomId = read.readLong();
     isProtected = read.readBoolean();
-    type = ClajType.read(read.buffer);
+    type = ClajType.read(read);
     clients = read.readChar();
     maxClients = read.readChar();
     super.readImpl(read);
@@ -46,14 +46,14 @@ public class RoomInfoPacket extends RoomStatePacket {
   public void write(ByteBufferOutput write) {
     write.writeLong(roomId);
     write.writeBoolean(isProtected);
-    type.write(write.buffer);
+    type.write(write);
     write.writeChar(clients);
     write.writeChar(maxClients);
     super.write(write);
   }
-    
+
   @Override
-  public boolean allow(boolean isServer) { 
-    return !isServer; 
+  public boolean allow(boolean isServer) {
+    return !isServer;
   }
 }

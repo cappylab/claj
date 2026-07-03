@@ -42,7 +42,7 @@ public class RoomListPacket extends DelayedPacket {
     }
     return this;
   }
-  
+
   @Override
   protected void readImpl(ByteBufferInput read) {
     for (int i=0, n=read.readInt(); i<n; i++) {
@@ -58,6 +58,7 @@ public class RoomListPacket extends DelayedPacket {
     write.writeInt(states.size);
     for (LongMap.Entry<ByteBuffer> e : states) {
       write.writeLong(e.key);
+      //TODO: optimize that
       write.writeBoolean(protectedRooms.contains(e.key));
       if (e.value != null) {
         write.writeChar(e.value.remaining());
@@ -65,9 +66,9 @@ public class RoomListPacket extends DelayedPacket {
       } else write.writeChar(0);
     }
   }
-    
+
   @Override
-  public boolean allow(boolean isServer) { 
-    return !isServer; 
+  public boolean allow(boolean isServer) {
+    return !isServer;
   }
 }

@@ -26,7 +26,6 @@ import java.nio.channels.ClosedSelectorException;
 import arc.func.Cons;
 import arc.net.*;
 import arc.struct.*;
-
 import com.xpdustry.claj.common.ClajPackets.Disconnect;
 import com.xpdustry.claj.common.net.ClientReceiver;
 
@@ -92,7 +91,7 @@ public abstract class ProxyClient extends Client {
 
     receiver.handle(Disconnect.class, _ -> {
       Throwable error = getLastProtocolError();
-      if (error != null) errorHandler.get(error);
+      if (error != null && errorHandler != null) errorHandler.get(error);
       clearPaquetQueue();
       //also close virtual connections?
     });
@@ -136,8 +135,8 @@ public abstract class ProxyClient extends Client {
     catch (ClosedSelectorException _) { close(); }
     catch (ArcNetException _) {} // Already handled by disconnect event
     catch (Exception e) {
-      if (errorHandler != null) errorHandler.get(e);
-      else throw e;
+      if (errorHandler == null) throw e;
+      else errorHandler.get(e);
       close();
     }
     finally { shutdown = true; }
@@ -232,18 +231,28 @@ public abstract class ProxyClient extends Client {
     if (object == null) throw new IllegalArgumentException("object cannot be null.");
     if (connections.isEmpty()) return 0; // no need to broadcast is there is no clients
     if (!broadcastSupported) return connections.sum(c -> send(c, object, tcp));
-
-    Object p = makeBroadcastWrapPacket(object, tcp);
-    int written = tcp || forceTcp ? sendSafeTCP(p) : sendUDP(p);
+    int written = send(makeBroadcastWrapPacket(object, tcp), tcp);
     eachConnections(VirtualConnection::resetIdle);
     return written;
   }
 
-  public int send(int conId, Object object, boolean tcp) {
-    if (object == null) throw new IllegalArgumentException("object cannot be null.");
+  public int send(Object object) { return send(object, true); }
+  public int send(Object object, boolean tcp) {
+    try {
+      return tcp || forceTcp ? sendSafeTCP(object) : sendUDP(object);
+    } catch (Throwable th) {
+      RuntimeException e = new RuntimeException("FATAL: Failed to send object of type @" +
+                                                object.getClass().getName(), th);
+      if (errorHandler == null) throw e;
+      else errorHandler.get(e);
+      close(DcReason.error);
+      return -1;
+    }
+  }
 
-    Object p = makeConWrapPacket(conId, object, tcp);
-    return tcp || forceTcp ? sendSafeTCP(p) : sendUDP(p);
+  protected int send(int conId, Object object, boolean tcp) {
+    if (object == null) throw new IllegalArgumentException("object cannot be null.");
+    return send(makeConWrapPacket(conId, object, tcp), tcp);
   }
 
   public int send(VirtualConnection con, Object object, boolean tcp) {

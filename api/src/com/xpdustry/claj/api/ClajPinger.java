@@ -449,19 +449,19 @@ public class ClajPinger extends Client {
   }
 
   protected void requestRoomInfo(long roomId) {
-    RoomInfoRequestPacket p = new RoomInfoRequestPacket();
+    RoomInfoRequestPacket p = ClajNet.newLocalPacket(RoomInfoRequestPacket.class);
     p.roomId = roomId;
     sendTCP(p);
   }
 
   protected void requestRoomList() {
-    RoomListRequestPacket p = new RoomListRequestPacket();
+    RoomListRequestPacket p = ClajNet.newLocalPacket(RoomListRequestPacket.class);
     p.type = provider.getType();
     sendTCP(p);
   }
 
   protected void requestRoomJoin(long roomId, boolean withPassword, short password) {
-    RoomJoinRequestPacket p = new RoomJoinRequestPacket();
+    RoomJoinRequestPacket p = ClajNet.newLocalPacket(RoomJoinRequestPacket.class);
     p.roomId = roomId;
     p.withPassword = withPassword && password != NO_PASSWORD;
     p.password = password;

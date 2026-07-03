@@ -53,7 +53,7 @@ public class RawPacket implements Packet {
   @Override
   public void read(ByteBufferInput read) {
     if (data == null) data = copyRemaining(read);
-    else ((ByteBuffer) data.clear()).put(read.buffer).flip();
+    else ((ByteBuffer)data.clear()).put(read.buffer).flip();
   }
 
   @Override
@@ -86,7 +86,7 @@ public class RawPacket implements Packet {
     return new RawPacket(data, pooled);
   }
 
-  public static ByteBuffer copyRemaining(ByteBufferInput in) { return copyRemaining(in.buffer); }
+  public static ByteBuffer copyRemaining(ByteBufferInput in) { return copyRemaining(in, false); }
   public static ByteBuffer copyRemaining(ByteBufferInput in, boolean pooled) {
     return copyRemaining(in.buffer, pooled);
   }

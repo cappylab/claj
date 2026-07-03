@@ -22,6 +22,7 @@ package com.xpdustry.claj.common.util;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
+import arc.func.Func;
 import arc.func.Intf;
 import arc.util.Reflect;
 
@@ -33,6 +34,12 @@ public class Structs extends arc.util.Structs {
     int tail = array.length - index;
     if (tail > 0) System.arraycopy(array, index, next, index + 1, tail);
     next[index] = item;
+    return next;
+  }
+
+  public static <T, R> R[] map(T[] array, Class<R> type, Func<T, R> mapper) {
+    R[] next = Reflect.newArray(type, array.length);
+    for (int i=0; i<array.length; i++) next[i] = mapper.get(array[i]);
     return next;
   }
 

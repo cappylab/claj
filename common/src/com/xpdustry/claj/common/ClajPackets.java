@@ -19,8 +19,11 @@
 
 package com.xpdustry.claj.common;
 
+import arc.net.DcReason;
+
 import com.xpdustry.claj.common.net.stream.*;
 import com.xpdustry.claj.common.packets.*;
+import com.xpdustry.claj.common.util.Structs;
 
 
 public class ClajPackets {
@@ -61,7 +64,11 @@ public class ClajPackets {
 
   /** Generic client disconnection event. */
   public static class Disconnect implements Packet {
-    public arc.net.DcReason reason;
+    static final Disconnect[] all = Structs.map(DcReason.values(), Disconnect.class, Disconnect::new);
+    public final DcReason reason;
+    Disconnect(DcReason reason) { this.reason = reason; }
+    public static Disconnect get(int i) { return all[i]; }
+    public static Disconnect get(DcReason reason) { return get(reason.ordinal()); }
   }
 
   /** Generic client idle event. */

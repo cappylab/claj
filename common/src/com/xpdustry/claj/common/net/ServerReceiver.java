@@ -69,9 +69,7 @@ public class ServerReceiver implements NetListener {
   @Override
   public void disconnected(Connection connection, DcReason reason) {
     if (!filter.disconnected(connection, reason)) return;
-    Disconnect packet = new Disconnect();
-    packet.reason = reason;
-    delegateReceive(connection, packet);
+    delegateReceive(connection, Disconnect.get(reason));
   }
 
   @Override

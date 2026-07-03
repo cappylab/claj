@@ -23,16 +23,16 @@ import arc.net.DcReason;
 import arc.util.io.ByteBufferInput;
 import arc.util.io.ByteBufferOutput;
 
+import com.xpdustry.claj.common.ClajPackets.Disconnect;
+
 
 public class ConnectionClosedPacket extends ConnectionWrapperPacket {
-  private static final DcReason[] reasons = DcReason.values();
-
   public DcReason reason;
 
   @Override
   public void read(ByteBufferInput read) {
     super.read(read);
-    reason = reasons[read.readByte()];
+    reason = Disconnect.get(read.readUnsignedByte()).reason;
   }
 
   @Override
