@@ -91,12 +91,23 @@ project(":client") {
     include "mod.hjson"
     include "icon.png"
   }
+  
+  // This is badly made... We need to make a fat jar just for dex compilation,
+  // as the property only takes one file as argument
+  task mergeDependenciesForDexJar(type: Jar) {
+    from sourceSets.main.output
+    from {
+      configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    destinationDirectory = temporaryDir
+  }
+  dexJar.source = mergeDependenciesForDexJar.archiveFile
 
   // Includes android dex
   assemble.dependsOn mergeJar
 
   // For testing
-  runMindustryDesktop.mods.from(mergeJar)
+  runMindustryDesktop.mods.from mergeJar
   task run(dependsOn: runMindustryDesktop) {
     toxopid.compileVersion = "v${project.compileVersionV8}"
   }

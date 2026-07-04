@@ -35,6 +35,14 @@ import com.xpdustry.claj.common.packets.RawPacket;
 
 
 public class ClajClientSerializer implements NetSerializer, FrameworkSerializer {
+  /**
+   * Since {@link ClajProxy} and {@link ClajPinger} currently process packets on the same thread,
+   * without not delaying to the main thread, this option can be safely set to {@code true}. <br>
+   * If you're making a custom implementation or changing packet handling,
+   * remember to set that to {@code false. This will globally disable packet reuse.
+   */
+  public static boolean REUSE_PACKETS = true;
+
   protected final ThreadLocal<ByteBufferInput> read = Threads.local(ByteBufferInput::new);
   protected final ThreadLocal<ByteBufferOutput> write = Threads.local(ByteBufferOutput::new);
 
@@ -53,7 +61,8 @@ public class ClajClientSerializer implements NetSerializer, FrameworkSerializer 
   }
 
   public Packet readClaj(ByteBuffer buffer) {
-    Packet packet = ClajNet.newPacket(buffer.get());
+    byte id = buffer.get();
+    Packet packet = REUSE_PACKETS ? ClajNet.newLocalPacket(id) : ClajNet.newPacket(id);
     if(!packet.allow(false)) throw new ArcNetException("Invalid packet type for endpoint: " + packet.getClass());
     ByteBufferInput in = read.get();
     in.buffer = buffer;
@@ -77,17 +86,4 @@ public class ClajClientSerializer implements NetSerializer, FrameworkSerializer 
     out.buffer = buffer;
     packet.write(out);
   }
-
-  /*
-  // Default methods sends a signed short instead of an unsigned one...
-  @Override
-  public void writeLength(ByteBuffer buffer, int length) {
-    buffer.putChar((char)length); // char is encoded as an unsigned short
-  }
-
-  @Override
-  public int readLength(ByteBuffer buffer) {
-    return buffer.getChar();
-  }
-  */
 }

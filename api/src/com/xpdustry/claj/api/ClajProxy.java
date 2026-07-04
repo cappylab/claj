@@ -22,6 +22,7 @@ package com.xpdustry.claj.api;
 import java.nio.ByteBuffer;
 
 import arc.func.Cons;
+import arc.func.Cons2;
 import arc.net.DcReason;
 import arc.util.Time;
 
@@ -82,9 +83,9 @@ public class ClajProxy extends ProxyClient {
     receiver.handle(RoomLinkPacket.class, p -> runRoomCreated(p.roomId));
     receiver.handle(RoomStateRequestPacket.class, this::notifyRoomState);
 
-    receiver.handle(ClajTextMessagePacket.class, p -> postTask(() -> provider.showTextMessage(this, p.message)));
-    receiver.handle(ClajMessagePacket.class, p -> postTask(() -> provider.showMessage(this, p.message)));
-    receiver.handle(ClajPopupPacket.class, p -> postTask(() -> provider.showPopup(this, p.message)));
+    receiver.handle(ClajTextMessagePacket.class, p -> postTask(provider::showTextMessage, this, p.message));
+    receiver.handle(ClajMessagePacket.class, p -> postTask(provider::showMessage, this, p.message));
+    receiver.handle(ClajPopupPacket.class, p -> postTask(provider::showPopup, this, p.message));
   }
 
   /** This method must be used instead of others connect methods */
@@ -103,6 +104,7 @@ public class ClajProxy extends ProxyClient {
   }
 
   // Helpers
+  protected <T1, T2> void postTask(Cons2<T1, T2> consumer, T1 t1, T2 t2) { postTask(() -> consumer.get(t1, t2)); }
   protected <T> void postTask(Cons<T> consumer, T object) { postTask(() -> consumer.get(object)); }
   protected void postTask(Runnable run) { provider.postTask(run); }
 

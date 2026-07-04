@@ -71,10 +71,6 @@ public class ClajNet {
     return i;
   }
 
-  protected static Prov<?> getPacket(byte id) {
-    return packets.get(getIndex(id));
-  }
-
   public static byte getId(Packet packet) { return getId(packet.getClass()); }
   public static byte getId(Class<? extends Packet> packet) {
     return (byte)getIndex(packet);
@@ -82,7 +78,7 @@ public class ClajNet {
 
   @SuppressWarnings("unchecked")
   public static <T extends Packet> T newPacket(byte id) {
-    return (T)getPacket(id).get();
+    return (T)packets.get(getIndex(id)).get();
   }
 
   public static <T extends Packet> T newLocalPacket(byte id) { return newLocalPacket(id, true); }
@@ -112,7 +108,7 @@ public class ClajNet {
   protected static <T extends Packet> T newLocalPacket(int index, boolean fast) {
     ThreadLocal<?> local = packetLocals.get(index);
     if (local == null) {
-      Prov<?> prov = getPacket(id);
+      Prov<?> prov = packets.get(index);
       local = fast ? FastThreadLocal.with(prov): Threads.local(prov);
       packetLocals.set(index, local);
     }
@@ -134,7 +130,7 @@ public class ClajNet {
   protected static <T extends Packet> T newPooledPacket(int index) {
     Pool<?> pool = packetPools.get(index);
     if (pool == null) {
-      Prov<?> prov = getPacket(id);
+      Prov<?> prov = packets.get(index);
       pool = new Pool<>(8, 128) { protected Object newObject() { return prov.get(); } };
       packetPools.set(index, pool);
     }

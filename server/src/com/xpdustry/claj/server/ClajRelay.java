@@ -59,7 +59,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   public final LongMap<ClajRoom> rooms = new LongMap<>();
   /** Rooms sorted by type. DO NOT EDIT MANUALLY! */
   public final ObjectMap<ClajType, LongMap<ClajRoom>> types = new ObjectMap<>(8);
-  /** As the server is very talkative, here is a field to shut up logs (excepts debug and errors) for a time. */
+  /** As the server is very talkative, here is a field to shut up info and warn logs for a time. */
   public volatile boolean beQuiet;
   /** Total number of clients in rooms. */
   protected int clientsInRooms;
@@ -68,7 +68,7 @@ public class ClajRelay extends Server implements ApplicationListener {
   /** As server version will not change at runtime, cache the serialized packet to avoid re-serialization. */
   private ByteBuffer versionBuff;
   /** Empty room list to send to client requesting no type or a not found one. */
-  protected final RoomListPacket emptyList = new RoomListPacket().clear(true);
+  private final RoomListPacket emptyList = new RoomListPacket().clear(true);
 
   public ClajRelay() { this(null); }
   public ClajRelay(NetworkSpeed speedCalculator) {
@@ -538,7 +538,7 @@ public class ClajRelay extends Server implements ApplicationListener {
     if (connection == null) return;
     ClajRoom room = connection.currentRoom();
     if (room != null) room.received(connection, packet);
-    else connection.addQueue(packet);
+    else connection.addQueue(packet.pooled() ? packet : packet.copy());
   }
 
   // end region
@@ -653,8 +653,8 @@ public class ClajRelay extends Server implements ApplicationListener {
     ClajRoom room = newRoom(host, type);
     rooms.put(room.id, room);
     if (type != null) types.get(type, LongMap::new).put(room.id, room);
-    room.create();
     clientsInRooms++;
+    room.create();
     if (room.isClosed()) closeRoom(room);
     else setRoomAfk(room, true);
     return room;
@@ -747,10 +747,10 @@ public class ClajRelay extends Server implements ApplicationListener {
   public void clearRoom(ClajRoom room, DcReason reason, boolean quiet) {
     if (room == null) return;
     room.clients.each(routines::clearClientCache);
-    int clients = room.clients();
+    clientsInRooms -= room.clients();
     room.disconnectAllClients(reason, !quiet);
     setRoomAfk(room, true);
-    clientsInRooms -= clients;
+
   }
 
   public void setRoomConfiguration(ClajRoom room, boolean isPublic, boolean isProtected, short password,

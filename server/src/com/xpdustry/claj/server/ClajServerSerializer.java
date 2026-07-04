@@ -36,14 +36,22 @@ import com.xpdustry.claj.server.util.NetworkSpeed;
 
 
 public class ClajServerSerializer implements NetSerializer, FrameworkSerializer {
-  public static boolean POOLED_RAW_PACKETS = true; //final?
+  public static boolean POOLED_BUFFERS = true;
+  /** This includes {@link ConnectionPayloadPacket} and {@link RawPacket}. */
+  public static boolean REUSE_RAW_PACKETS = false;
+
+
+  private static final RawPacket rpi = new RawPacket();
+  private static final ConnectionPayloadPacket cppi = new ConnectionPayloadPacket();
+  private static final byte cpp = ClajNet.getId(ConnectionPayloadPacket.class);
+
 
   static {
     // Set wrapper serializer
     ConnectionPayloadPacket.serializer = new ConnectionPayloadPacket.Serializer() {
       @Override
       public void read(ConnectionPayloadPacket packet, ByteBufferInput read) {
-        packet.raw = new RawPacket(read, POOLED_RAW_PACKETS);
+        if (!REUSE_RAW_PACKETS) packet.raw = new RawPacket(read, POOLED_BUFFERS);
       }
       @Override
       public void write(ConnectionPayloadPacket packet, ByteBufferOutput write) {
@@ -82,7 +90,13 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   }
 
   public Packet readClaj(ByteBuffer buffer) {
-    Packet packet = ClajNet.newPacket(buffer.get());
+    byte id = buffer.get();
+    if (REUSE_RAW_PACKETS && id == cpp) {
+      cppi.raw = rpi.set(buffer, false);
+      return cppi;
+    }
+
+    Packet packet = ClajNet.newPacket(id);
     if(!packet.allow(true)) throw new ArcNetException("Invalid packet type for endpoint: " + packet.getClass());
     ByteBufferInput in = read.get();
     in.buffer = buffer;
@@ -92,7 +106,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
 
   public RawPacket readRaw(ByteBuffer buffer) {
     buffer.position(buffer.position()-1);
-    return new RawPacket(buffer, POOLED_RAW_PACKETS);
+    return REUSE_RAW_PACKETS ? rpi.set(buffer, false) : new RawPacket(buffer, POOLED_BUFFERS);
   }
 
   @Override
@@ -110,9 +124,9 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   }
 
   public void writeClaj(ByteBuffer buffer, Packet packet) {
+    if (!(packet instanceof RawPacket)) buffer.put(ClajNet.id).put(ClajNet.getId(packet));
     ByteBufferOutput out = write.get();
     out.buffer = buffer;
-    if (!(packet instanceof RawPacket)) buffer.put(ClajNet.id).put(ClajNet.getId(packet));
     packet.write(out);
   }
 

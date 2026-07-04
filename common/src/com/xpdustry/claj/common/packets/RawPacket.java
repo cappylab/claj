@@ -31,8 +31,8 @@ import com.xpdustry.claj.common.util.ByteBufferPool;
  * This is only needed due to compatibility with receivers.
  */
 public class RawPacket implements Packet {
-  protected ByteBuffer data;
-  protected boolean pooled;
+  protected volatile ByteBuffer data;
+  protected volatile boolean pooled;
   /** Auto-{@link #free} {@link #data} after {@link #write} call. */
   public boolean autoFree = true;
 
@@ -66,6 +66,13 @@ public class RawPacket implements Packet {
     } else write(data, write);
   }
 
+  /** USE WITH CAUTIONS!! */
+  public RawPacket set(ByteBuffer data, boolean pooled) {
+    this.data = data;
+    this.pooled = pooled;
+    return this;
+  }
+
   public ByteBuffer data() {
     return data;
   }
@@ -75,9 +82,11 @@ public class RawPacket implements Packet {
   }
 
   public void free() {
+    boolean pooled = this.pooled;
+    this.pooled = false;
+    ByteBuffer data = this.data;
+    this.data = null;
     if (pooled && data != null) ByteBufferPool.get().release(data);
-    data = null;
-    pooled = false;
   }
 
   // Helpers

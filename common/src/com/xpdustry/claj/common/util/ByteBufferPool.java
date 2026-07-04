@@ -80,6 +80,7 @@ public final class ByteBufferPool {
 
 
   private static final class Bucket {
+    //TODO: optimize to avoid making a node every times we freeing a buffer
     final ConcurrentLinkedQueue<ByteBuffer> queue = new ConcurrentLinkedQueue<>();
     final AtomicInteger size = new AtomicInteger();
 
