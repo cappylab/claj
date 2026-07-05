@@ -707,14 +707,14 @@ public class ClajRelay extends Server implements ApplicationListener {
   public boolean addClient(ClajRoom room, ClajConnection con) {
     if (con == null || room == null) return false;
     int clients = room.clients(); // because all clients will be kicked before cleaning cache
+    clientsInRooms++;
     room.connected(con);
     if (room.isClosed()) {
-      clientsInRooms -= clients;
+      clientsInRooms -= clients + 1;
       closeRoom(room);
       return false;
     }
     setRoomAfk(room, false);
-    clientsInRooms++;
     return true;
   }
 
@@ -727,7 +727,8 @@ public class ClajRelay extends Server implements ApplicationListener {
     ClajRoom room = con.currentRoom();
     if (room == null) return false;
     boolean wasHost = con.isRoomHost();
-    int clients = room.clients(); // because all clients can be kicked before cleaning cache
+    int clients = room.clients() - 1; // because all clients can be kicked before cleaning cache
+    clientsInRooms--;
 
     if (quiet) room.disconnectedQuietly(con, reason);
     else room.disconnected(con, reason);
@@ -735,7 +736,6 @@ public class ClajRelay extends Server implements ApplicationListener {
     // Close the room if it was the host
     if (!wasHost && !room.isClosed()) {
       setRoomAfk(room, true);
-      clientsInRooms--;
     } else {
       clientsInRooms -= clients;
       closeRoom(room);

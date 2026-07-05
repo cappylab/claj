@@ -245,7 +245,7 @@ public class ClajRoom implements NetListener {
 
     // Broadcast send
     if (wrap.conID == CON_BROADCAST) {
-      //TODO: send broadcast close error for next major version
+      //TODO: send broadcast close error, when no clients are in this room, for next major version
       wrap.raw.autoFree = false; // avoid freeing it at first send
       // Crappy but will avoid an NPE when a client is disconnecting
       Object[] cons = clients.items;

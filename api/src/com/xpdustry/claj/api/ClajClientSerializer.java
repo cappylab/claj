@@ -36,10 +36,10 @@ import com.xpdustry.claj.common.packets.RawPacket;
 
 public class ClajClientSerializer implements NetSerializer, FrameworkSerializer {
   /**
-   * Since {@link ClajProxy} and {@link ClajPinger} currently process packets on the same thread,
-   * without not delaying to the main thread, this option can be safely set to {@code true}. <br>
+   * Since {@link ClajProxy} and {@link ClajPinger} currently process packets on the same thread
+   * without delaying to the main thread, this option can be safely set to {@code true}. <br>
    * If you're making a custom implementation or changing packet handling,
-   * remember to set that to {@code false. This will globally disable packet reuse.
+   * remember to set that to {@code false} to avoid any corruption. This will globally disable packet reuse.
    */
   public static boolean REUSE_PACKETS = true;
 

@@ -125,7 +125,7 @@ public class ClajProxy extends ProxyClient {
     if (!broadcastSupported || testingBroadcast) return;
     broadcastTestStart = Time.millis();
     testingBroadcast = true;
-    send(CON_BROADCAST, ByteBuffer.allocate(0), true);
+    broadcastImpl(ByteBuffer.allocate(0), true);
   }
 
   /** This also resets room id and removes callbacks. */
@@ -161,6 +161,7 @@ public class ClajProxy extends ProxyClient {
   /** {@code null} reason means closed by user. */
   public void closeRoom(CloseReason reason) {
     if (!roomCreated()) return;
+    closeAllConnections(DcReason.closed);
     send(makeRoomClosePacket());
     runRoomClose(reason);
   }
@@ -198,6 +199,52 @@ public class ClajProxy extends ProxyClient {
       throw new IllegalArgumentException("State size must be less than " + RoomStatePacket.MAX_BUFF_SIZE);
     send(makeRoomStatePacket(roomId, state));
   }
+
+  // Region callbacks
+
+  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
+  @Override
+  protected VirtualConnection conConnected(int conId, long addressHash) {
+    if (!roomCreated()) return null;
+    // Of course broadcasting a connect event makes no sense.
+    if (conId == CON_BROADCAST) return null;
+    VirtualConnection con = getConnection(conId); // avoid multiple connect events
+    return con == null ? super.conConnected(conId, addressHash) : con;
+  }
+
+  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
+  @Override
+  protected VirtualConnection conDisconnected(int conId, DcReason reason) {
+    if (!roomCreated()) return null;
+    if (conId != CON_BROADCAST) return super.conDisconnected(conId, reason);
+    if (testingBroadcast && reason == DcReason.error &&
+        Time.timeSinceMillis(broadcastTestStart) < broadcastTestTimeout) {
+      testingBroadcast = broadcastSupported = false;
+      return null;
+    }
+    eachConnections(c -> closeQuietly(c, reason));
+    return null;
+  }
+
+  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
+  @Override
+  protected VirtualConnection conReceived(int conId, Object object) {
+    if (!roomCreated()) return null;
+    if (conId != CON_BROADCAST) return super.conReceived(conId, object);
+    eachConnections(c -> c.notifyReceived0(object));
+    return null;
+  }
+
+  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
+  @Override
+  protected VirtualConnection conIdle(int conId) {
+    if (!roomCreated()) return null;
+    if (conId != CON_BROADCAST) return super.conIdle(conId);
+    eachConnections(VirtualConnection::notifyIdle0);
+    return null;
+  }
+
+  // Region packet making
 
   /** Packet ids for optimization. */
   private static final byte
@@ -259,47 +306,5 @@ public class ClajProxy extends ProxyClient {
     p.conID = conId;
     p.reason = reason;
     return p;
-  }
-
-  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
-  @Override
-  protected VirtualConnection conConnected(int conId, long addressHash) {
-    if (!roomCreated()) return null;
-    // Of course broadcasting a connect event makes no sense.
-    if (conId == CON_BROADCAST) return null;
-    VirtualConnection con = getConnection(conId); // avoid multiple connect events
-    return con == null ? super.conConnected(conId, addressHash) : con;
-  }
-
-  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
-  @Override
-  protected VirtualConnection conDisconnected(int conId, DcReason reason) {
-    if (!roomCreated()) return null;
-    if (conId != CON_BROADCAST) return super.conDisconnected(conId, reason);
-    if (testingBroadcast && reason == DcReason.error &&
-        Time.timeSinceMillis(broadcastTestStart) < broadcastTestTimeout) {
-      testingBroadcast = broadcastSupported = false;
-      return null;
-    }
-    eachConnections(c -> closeQuietly(c, reason));
-    return null;
-  }
-
-  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
-  @Override
-  protected VirtualConnection conReceived(int conId, Object object) {
-    if (!roomCreated()) return null;
-    if (conId != CON_BROADCAST) return super.conReceived(conId, object);
-    eachConnections(c -> c.notifyReceived0(object));
-    return null;
-  }
-
-  /** @return {@code null} if room isn't created or if {@code conId} is {@link #CON_BROADCAST}. */
-  @Override
-  protected VirtualConnection conIdle(int conId) {
-    if (!roomCreated()) return null;
-    if (conId != CON_BROADCAST) return super.conIdle(conId);
-    eachConnections(VirtualConnection::notifyIdle0);
-    return null;
   }
 }

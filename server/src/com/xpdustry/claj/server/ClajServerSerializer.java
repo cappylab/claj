@@ -38,10 +38,24 @@ import com.xpdustry.claj.server.util.NetworkSpeed;
 public class ClajServerSerializer implements NetSerializer, FrameworkSerializer {
   public static boolean POOLED_BUFFERS = true;
   /** This includes {@link ConnectionPayloadPacket} and {@link RawPacket}. */
-  public static boolean REUSE_RAW_PACKETS = false;
+  public static boolean REUSE_RAW_PACKETS = true;
 
 
-  private static final RawPacket rpi = new RawPacket();
+  private static class MyRawPacket extends RawPacket {
+    static final MyRawPacket intance = new MyRawPacket();
+    {
+      autoFree = false;
+      data = ByteBuffer.allocate(0);
+    }
+    public MyRawPacket read(ByteBuffer buffer) {
+      if (data.capacity() != buffer.capacity()) data = ByteBuffer.allocate(buffer.capacity());
+      else data.clear();
+      data.put(buffer).flip();
+      return this;
+    }
+    @Override
+    public void free() {} // Ensure no free
+  }
   private static final ConnectionPayloadPacket cppi = new ConnectionPayloadPacket();
   private static final byte cpp = ClajNet.getId(ConnectionPayloadPacket.class);
 
@@ -51,7 +65,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
     ConnectionPayloadPacket.serializer = new ConnectionPayloadPacket.Serializer() {
       @Override
       public void read(ConnectionPayloadPacket packet, ByteBufferInput read) {
-        if (!REUSE_RAW_PACKETS) packet.raw = new RawPacket(read, POOLED_BUFFERS);
+        packet.raw = REUSE_RAW_PACKETS ? MyRawPacket.intance.read(read.buffer) : new RawPacket(read, POOLED_BUFFERS);
       }
       @Override
       public void write(ConnectionPayloadPacket packet, ByteBufferOutput write) {
@@ -72,7 +86,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
 
   @Override
   public Object read(ByteBuffer buffer) {
-    if (networkSpeed != null) networkSpeed.downloadMark(buffer.remaining());
+    if (networkSpeed != null) networkSpeed.downloadMark(buffer.remaining() + getLengthLength());
     return switch (buffer.get()) {
       case ClajNet.frameworkId -> readFramework(buffer);
       case ClajNet.oldId -> readString(buffer);
@@ -91,12 +105,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
 
   public Packet readClaj(ByteBuffer buffer) {
     byte id = buffer.get();
-    if (REUSE_RAW_PACKETS && id == cpp) {
-      cppi.raw = rpi.set(buffer, false);
-      return cppi;
-    }
-
-    Packet packet = ClajNet.newPacket(id);
+    Packet packet = REUSE_RAW_PACKETS && id == cpp ? cppi : ClajNet.newPacket(id);
     if(!packet.allow(true)) throw new ArcNetException("Invalid packet type for endpoint: " + packet.getClass());
     ByteBufferInput in = read.get();
     in.buffer = buffer;
@@ -106,13 +115,12 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
 
   public RawPacket readRaw(ByteBuffer buffer) {
     buffer.position(buffer.position()-1);
-    return REUSE_RAW_PACKETS ? rpi.set(buffer, false) : new RawPacket(buffer, POOLED_BUFFERS);
+    return REUSE_RAW_PACKETS ? MyRawPacket.intance.read(buffer) : new RawPacket(buffer, POOLED_BUFFERS);
   }
 
   @Override
   public void write(ByteBuffer buffer, Object object) {
-    int lastPos = 0;
-    if (networkSpeed != null) lastPos = buffer.position();
+    int lastPos = networkSpeed != null ? buffer.position() : 0;
     switch (object) {
       case ByteBuffer buff -> buffer.put(buff);
       case FrameworkMessage framework -> writeFramework(buffer.put(ClajNet.frameworkId), framework);
@@ -120,7 +128,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
       case Packet packet -> writeClaj(buffer, packet);
       default -> throw new ArcNetException("Unknown packet type: " + object.getClass().getName());
     }
-    if (networkSpeed != null) networkSpeed.uploadMark(buffer.position() - lastPos);
+    if (networkSpeed != null) networkSpeed.uploadMark(buffer.position() - lastPos + getLengthLength());
   }
 
   public void writeClaj(ByteBuffer buffer, Packet packet) {

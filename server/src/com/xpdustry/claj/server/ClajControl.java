@@ -122,7 +122,8 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
       Log.info("&lk|&fr Version: CLaJ @ (@), Java @", state.version, state.majorVersion, state.javaVersion);
       Log.info("&lk|&fr Uptime: @", Strings.formatDuration(state.uptime, true));
       Log.info("&lk|&fr TPS: @", state.tps);
-      Log.info("&lk|&fr RAM: @ / @", Strings.formatBytes(state.usedHeap), Strings.formatBytes(state.allocatedHeap));
+      Log.info("&lk|&fr RAM: @ / @ (@)", Strings.formatBytes(state.usedHeap), Strings.formatBytes(state.allocatedHeap),
+                                         Strings.formatBytes(state.reservedMemory));
       Log.info("&lk|&fr CPU: @ (@)", String.format("%.2f%%", state.javaCpuLoad),
                String.format("%.2f%%", state.systemCpuLoad));
       Log.info("&lk|&fr Load: @ rooms, @ clients, @ connections.", state.rooms, state.clients, state.connections);

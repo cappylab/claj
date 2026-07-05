@@ -26,6 +26,8 @@ import java.nio.channels.ClosedSelectorException;
 import arc.func.Cons;
 import arc.net.*;
 import arc.struct.*;
+import arc.util.Structs;
+
 import com.xpdustry.claj.common.ClajPackets.Disconnect;
 import com.xpdustry.claj.common.net.ClientReceiver;
 
@@ -51,6 +53,8 @@ public abstract class ProxyClient extends Client {
 
   protected final IntMap<VirtualConnection> connectionsMap = new IntMap<>(16);
   protected final Seq<VirtualConnection> connections = new Seq<>(false);
+  /** Used by {@link #close(VirtualConnection, DcReason)} to thread-safely remove a connection. */
+  private VirtualConnection[] stales = null;
 
   protected NetListener conListener;
   protected volatile boolean shutdown = true, starting, connecting, closing;
@@ -62,6 +66,7 @@ public abstract class ProxyClient extends Client {
   protected final Queue<Object> packetQueue = new Queue<>();
   protected int writeBufferThreshold;
   protected volatile boolean hasQueued = false; // used for fast check
+
   /**
    * Whether to force using the tcp connection when sending trough udp to the server. <br>
    * The server will then send it via udp to the real client. <br>
@@ -79,13 +84,7 @@ public abstract class ProxyClient extends Client {
   public ProxyClient(int writeBufferSize, int objectBufferSize, NetSerializer serialization,
                      Cons<Runnable> taskPoster) {
     super(writeBufferSize, objectBufferSize, serialization);
-    receiver = new ClientReceiver(this, taskPoster)/* {
-      @Override
-      public void received(Connection connection, Object object) {
-        arc.util.Log.info("Received packet @", object.getClass().getSimpleName());
-        super.received(connection, object);
-      }
-    }*/;
+    receiver = new ClientReceiver(this, taskPoster);
     writeBufferThreshold = (int)(writeBufferSize * 0.9f);
     setIdleThreshold(0.2f);
 
@@ -122,10 +121,27 @@ public abstract class ProxyClient extends Client {
 
   @Override
   public void update(int timeout) throws IOException {
+    clearStales();
     updatePing();
     super.update(timeout);
     updateIdle();
     if (isIdle()) flushPacketQueue(); // only flush when idle to avoid ping-pong
+  }
+
+  /** Tries to mimic connection idling. */
+  public void updateIdle() {
+    for (VirtualConnection c : getConnections()) {
+      c.updateIdle();
+      if (c.isIdle()) c.notifyIdle0();
+    }
+  }
+
+  public void updatePing() {
+    if (!isConnected()) return;
+    long now = System.currentTimeMillis();
+    if (now - lastPing <= pingTime) return;
+    lastPing = now;
+    updateReturnTripTime();
   }
 
   @Override
@@ -135,9 +151,9 @@ public abstract class ProxyClient extends Client {
     catch (ClosedSelectorException _) { close(); }
     catch (ArcNetException _) {} // Already handled by disconnect event
     catch (Exception e) {
-      if (errorHandler == null) throw e;
-      else errorHandler.get(e);
+      if (errorHandler != null) errorHandler.get(e);
       close();
+      if (errorHandler == null) throw e;
     }
     finally { shutdown = true; }
   }
@@ -186,9 +202,30 @@ public abstract class ProxyClient extends Client {
       c.setConnected0(false);
       if(wasConnected) c.notifyDisconnected0(reason);
       c.resetIdle();
+      if (!broadcastSupported) close(c.getID(), reason);
     }
-    if (isConnected() && connections.any()) sendTCP(makeBroadcastClosePacket(reason));
+    if (connections.any() && broadcastSupported) send(makeBroadcastClosePacket(reason));
     clearConnections();
+    stales = null;
+  }
+
+  private void addStale(VirtualConnection con) {
+    if (con == null) return;
+    VirtualConnection[] stales = this.stales;
+    this.stales = stales == null ? new VirtualConnection[] {con} : Structs.add(stales, con);
+  }
+
+  private void clearStales() {
+    VirtualConnection[] stales = this.stales;
+    this.stales = null;
+    if (stales == null) return;
+    Structs.each(this::removeConnection, stales);
+  }
+
+  private boolean isStale(VirtualConnection con) {
+    if (con == null) return false;
+    VirtualConnection[] stales = this.stales;
+    return stales != null && Structs.contains(stales, con::equals);
   }
 
   protected void addConnection(VirtualConnection con) {
@@ -231,6 +268,11 @@ public abstract class ProxyClient extends Client {
     if (object == null) throw new IllegalArgumentException("object cannot be null.");
     if (connections.isEmpty()) return 0; // no need to broadcast is there is no clients
     if (!broadcastSupported) return connections.sum(c -> send(c, object, tcp));
+    return broadcastImpl(object, tcp);
+  }
+
+  /** Doesn't checks for availability. */
+  protected int broadcastImpl(Object object, boolean tcp) {
     int written = send(makeBroadcastWrapPacket(object, tcp), tcp);
     eachConnections(VirtualConnection::resetIdle);
     return written;
@@ -238,8 +280,9 @@ public abstract class ProxyClient extends Client {
 
   public int send(Object object) { return send(object, true); }
   public int send(Object object, boolean tcp) {
+    if (!isConnected()) return 0;
     try {
-      return tcp || forceTcp ? sendSafeTCP(object) : sendUDP(object);
+      return tcp || forceTcp ? sendTCP(object) : sendUDP(object);
     } catch (Throwable th) {
       RuntimeException e = new RuntimeException("FATAL: Failed to send object of type @" +
                                                 object.getClass().getName(), th);
@@ -250,68 +293,11 @@ public abstract class ProxyClient extends Client {
     }
   }
 
-  protected int send(int conId, Object object, boolean tcp) {
-    if (object == null) throw new IllegalArgumentException("object cannot be null.");
-    return send(makeConWrapPacket(conId, object, tcp), tcp);
-  }
-
   public int send(VirtualConnection con, Object object, boolean tcp) {
-    int written = send(con.getID(), object, tcp);
+    if (object == null) throw new IllegalArgumentException("object cannot be null.");
+    int written = send(makeConWrapPacket(con.getID(), object, tcp), tcp);
     con.resetIdle();
     return written;
-  }
-
-
-  //FIXME: dangerous as everything assumes that packets are serialized in-place.
-  /**
-   * Because all {@link VirtualConnection}s shares the same tcp buffer, it can be filled quickly. <br>
-   * This tries to queue packets when needed, to avoid overflows.
-   */
-  public int sendSafeTCP(Object object) {
-    // Fast path
-    if (!hasQueued && getTcpWriteBufferSize() <= writeBufferThreshold)
-      return sendTCP(object);
-
-    synchronized (packetQueue) {
-      if (hasQueued || getTcpWriteBufferSize() > writeBufferThreshold) {
-        packetQueue.add(object);
-        hasQueued = true;
-        return 0;
-      }
-    }
-    return sendTCP(object);
-  }
-
-  public void flushPacketQueue() {
-    if (!hasQueued) return; // fast check
-    synchronized (packetQueue) {
-      while (!packetQueue.isEmpty() && getTcpWriteBufferSize() <= writeBufferThreshold)
-        sendTCP(packetQueue.removeFirst());
-      hasQueued = !packetQueue.isEmpty();
-    }
-  }
-
-  public void clearPaquetQueue() {
-    synchronized (packetQueue) {
-      packetQueue.clear();
-      hasQueued = false;
-    }
-  }
-
-  /** Tries to mimic connection idling. */
-  public void updateIdle() {
-    for (VirtualConnection c : getConnections()) {
-      c.updateIdle();
-      if (c.isIdle()) c.notifyIdle0();
-    }
-  }
-
-  public void updatePing() {
-    if (!isConnected()) return;
-    long now = System.currentTimeMillis();
-    if (now - lastPing <= pingTime) return;
-    lastPing = now;
-    updateReturnTripTime();
   }
 
   /**
@@ -319,7 +305,7 @@ public abstract class ProxyClient extends Client {
    * This will not trigger callbacks.
    */
   protected void close(int conId, DcReason reason) {
-    if (isConnected()) sendTCP(makeConClosePacket(conId, reason));
+    send(makeConClosePacket(conId, reason));
   }
 
   public void close(VirtualConnection con, DcReason reason) {
@@ -329,17 +315,19 @@ public abstract class ProxyClient extends Client {
 
   /** Close connection without notify the server. */
   public void closeQuietly(VirtualConnection con, DcReason reason) {
+    addStale(con);
     boolean wasConnected = con.isConnected();
     con.setConnected0(false);
     if(wasConnected) con.notifyDisconnected0(reason);
-    removeConnection(con);
     con.resetIdle();
   }
 
   /** @return never {@code null}. */
   protected VirtualConnection conConnected(int conId, long addressHash) {
     VirtualConnection con = getConnection(conId);
-    if (con == null) {
+    boolean stale = false;
+    if (con == null || (stale = isStale(con))) {
+      if (stale) clearStales(); // Clear stale connections now to avoid a duplicate
       con = new VirtualConnection(this, conId, addressHash);
       if (conListener != null) con.addListener(conListener);
       addConnection(con);
@@ -350,18 +338,21 @@ public abstract class ProxyClient extends Client {
 
   protected VirtualConnection conDisconnected(int conId, DcReason reason) {
     VirtualConnection con = getConnection(conId);
+    if (isStale(con)) return null;
     if (con != null) closeQuietly(con, reason);
     return con;
   }
 
   protected VirtualConnection conReceived(int conId, Object object) {
     VirtualConnection con = getConnection(conId);
+    if (isStale(con)) return null;
     if (con != null) con.notifyReceived0(object);
     return con;
   }
 
   protected VirtualConnection conIdle(int conId) {
     VirtualConnection con = getConnection(conId);
+    if (isStale(con)) return null;
     if (con != null) con.notifyIdle0();
     return con;
   }
@@ -370,4 +361,44 @@ public abstract class ProxyClient extends Client {
   protected abstract Object makeBroadcastClosePacket(DcReason reason);
   protected abstract Object makeConWrapPacket(int conId, Object object, boolean tcp);
   protected abstract Object makeConClosePacket(int conId, DcReason reason);
+
+
+  //FIXME: dangerous as everything assumes that packets are serialized in-place.
+  // Do we make waiting or a growable buffer?
+  /**
+   * Because all {@link VirtualConnection}s shares the same tcp buffer, it can be filled quickly. <br>
+   * This tries to queue packets when needed, to avoid overflows.
+   */
+  @Override
+  public int sendTCP(Object object) {
+    // Fast path
+    if (!hasQueued && getTcpWriteBufferSize() <= writeBufferThreshold)
+      return super.sendTCP(object);
+
+    synchronized (packetQueue) {
+      if (hasQueued || getTcpWriteBufferSize() > writeBufferThreshold) {
+        packetQueue.add(object);
+        hasQueued = true;
+        return 0;
+      }
+    }
+    return super.sendTCP(object);
+  }
+
+  private void flushPacketQueue() {
+    if (!hasQueued) return; // fast check
+    synchronized (packetQueue) {
+      arc.util.Log.debug("queue.size=@; flushable=@", packetQueue.size, getTcpWriteBufferSize() <= writeBufferThreshold);
+      while (!packetQueue.isEmpty() && getTcpWriteBufferSize() <= writeBufferThreshold)
+        super.sendTCP(packetQueue.removeFirst());
+      hasQueued = !packetQueue.isEmpty();
+    }
+  }
+
+  private void clearPaquetQueue() {
+    synchronized (packetQueue) {
+      packetQueue.clear();
+      hasQueued = false;
+    }
+  }
 }

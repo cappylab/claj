@@ -66,13 +66,6 @@ public class RawPacket implements Packet {
     } else write(data, write);
   }
 
-  /** USE WITH CAUTIONS!! */
-  public RawPacket set(ByteBuffer data, boolean pooled) {
-    this.data = data;
-    this.pooled = pooled;
-    return this;
-  }
-
   public ByteBuffer data() {
     return data;
   }
