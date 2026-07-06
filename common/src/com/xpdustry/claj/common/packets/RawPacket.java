@@ -79,7 +79,7 @@ public class RawPacket implements Packet {
     this.pooled = false;
     ByteBuffer data = this.data;
     this.data = null;
-    if (pooled && data != null) ByteBufferPool.get().release(data);
+    if (pooled && data != null) ByteBufferPool.free(data);
   }
 
   // Helpers
@@ -96,7 +96,7 @@ public class RawPacket implements Packet {
   /** if {@code pooled}, {@link ByteBufferPool#free()} must be called after use. */
   public static ByteBuffer copyRemaining(ByteBuffer src, boolean pooled) {
     int len = src.remaining();
-    ByteBuffer data = pooled ? ByteBufferPool.get().obtain(len) : ByteBuffer.allocate(len);
+    ByteBuffer data = pooled ? ByteBufferPool.getDirect(len) : ByteBuffer.allocateDirect(len);
     data.put(src).flip();
     return data;
   }
@@ -105,7 +105,7 @@ public class RawPacket implements Packet {
   public static ByteBuffer read(ByteBufferInput read, int length, boolean pooled) {
     byte[] data = new byte[length];
     read.readFully(data);
-    return pooled ? ByteBufferPool.get().obtain(length).put(data) : ByteBuffer.wrap(data);
+    return pooled ? ByteBufferPool.getHeap(length).put(data) : ByteBuffer.wrap(data);
   }
 
   /** Suppresses {@code src} reading. Optimized for backed array buffers. */
@@ -114,13 +114,10 @@ public class RawPacket implements Packet {
     if (src.hasArray()) {
       write.write(src.array(), src.arrayOffset() + src.position(), src.remaining());
     } else {
-      // Not safe to write buffer directly
-      //TODO: optimize
-      int pos = src.position();
-      byte[] bytes = new byte[src.remaining()];
-      src.get(bytes);
-      src.position(pos);
-      write.write(bytes);
+      // Not safe to write a direct buffer directly, as it can be a stream
+      for (int i=src.position(), n=src.limit(); i<n; i++) {
+        write.write(src.get(i));
+      }
     }
   }
 }

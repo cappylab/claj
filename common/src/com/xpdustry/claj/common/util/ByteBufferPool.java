@@ -1,20 +1,21 @@
-//
-//  ========================================================================
-//  Copyright (c) 1995-2015 Mort Bay Consulting Pty. Ltd.
-//  ------------------------------------------------------------------------
-//  All rights reserved. This program and the accompanying materials
-//  are made available under the terms of the Eclipse Public License v1.0
-//  and Apache License v2.0 which accompanies this distribution.
-//
-//      The Eclipse Public License is available at
-//      http://www.eclipse.org/legal/epl-v10.html
-//
-//      The Apache License v2.0 is available at
-//      http://www.opensource.org/licenses/apache2.0.php
-//
-//  You may elect to redistribute this code under either of these licenses.
-//  ========================================================================
-//
+/**
+ * This file is part of CLaJ. The system that allows you to play with your friends,
+ * just by creating a room, copying the link and sending it to your friends.
+ * Copyright (c) 2026  Xpdustry
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 
 package com.xpdustry.claj.common.util;
 
@@ -27,10 +28,29 @@ import java.util.function.Function;
 
 public final class ByteBufferPool {
   private static final ByteBufferPool INSTANCE = new ByteBufferPool();
-  /** Optimization to avoid a bucket with only empty buffers. */
-  private static final ByteBuffer EMPTY = ByteBuffer.allocate(0);
 
-  private final ConcurrentHashMap<Integer, Bucket> buckets = new ConcurrentHashMap<>();
+  public static ByteBufferPool get() {
+    return INSTANCE;
+  }
+
+  public static ByteBuffer getHeap(int size) {
+    return get().obtain(size, false);
+  }
+
+  public static ByteBuffer getDirect(int size) {
+    return get().obtain(size, true);
+  }
+
+  public static boolean free(ByteBuffer buff) {
+    return get().release(buff);
+  }
+
+
+  /** Optimization to avoid a bucket with only empty buffers. */
+  private static final ByteBuffer EMPTY_HEAP = ByteBuffer.allocate(0),
+                                  EMPTY_DIRECT = ByteBuffer.allocateDirect(0);
+
+  private final ConcurrentHashMap<Integer, Bucket> heaps, directs;
   private final Function<Integer, Bucket> newBucket;
   public final int factor, bucketCap;
 
@@ -40,24 +60,36 @@ public final class ByteBufferPool {
   }
 
   public ByteBufferPool(int factor, int bucketCap) {
+    this.heaps = new ConcurrentHashMap<>(8);
+    this.directs = new ConcurrentHashMap<>(8);
     this.factor = factor;
     this.bucketCap = bucketCap;
     this.newBucket = _ -> new Bucket(bucketCap);
+  }
+
+  protected ByteBuffer newBuffer(boolean direct, int capacity) {
+    return direct ? ByteBuffer.allocateDirect(capacity) : ByteBuffer.allocate(capacity);
+  }
+
+  public ByteBuffer obtain(int size) {
+    return obtain(size, false);
   }
 
   /**
    * Get a buffer of the given {@code size} from free pool, or a new one. <br>
    * Capacity is rounded to the upper {@link #factor}, but limited to the given {@code size}.
    */
-  public ByteBuffer obtain(int size) {
-    if (size <= 0) return EMPTY;
+  public ByteBuffer obtain(int size, boolean direct) {
+    if (size <= 0) return direct ? EMPTY_DIRECT : EMPTY_HEAP;
     int bucketSize = ((size + factor - 1) / factor) * factor;
-    Bucket bucket = buckets.get(bucketSize);
+    Bucket bucket = (direct ? directs : heaps).get(bucketSize);
+    ByteBuffer buf = null;
     if (bucket != null) {
-      ByteBuffer buf = bucket.poll();
-      if (buf != null) return (ByteBuffer)((ByteBuffer)buf.clear()).limit(size);
+      buf = bucket.poll();
+      if (buf != null) buf = (ByteBuffer)buf.clear();
     }
-    return (ByteBuffer)ByteBuffer.allocate(bucketSize).limit(size);
+    if (buf == null) buf = newBuffer(direct, bucketSize);
+    return (ByteBuffer)buf.limit(size);
   }
 
   /**
@@ -68,31 +100,31 @@ public final class ByteBufferPool {
    */
   public boolean release(ByteBuffer buf) {
     if (buf == null || buf.capacity() <= 0 || buf.capacity() % factor != 0) return false;
-    return buckets.computeIfAbsent(buf.capacity(), newBucket).offer(buf);
+    return (buf.isDirect() ? directs : heaps).computeIfAbsent(buf.capacity(), newBucket).offer(buf);
   }
 
   /** Fill a {@code bucket} completely. */
   public void fill(int bucket) {
-    fill(bucket, bucketCap);
+    fill(bucket, bucketCap, false);
+  }
+
+  public void fill(int bucket, int size) {
+    fill(bucket, size, false);
   }
 
   /** Fill a {@code bucket} with {@code size} new buffers. */
-  public void fill(int bucket, int size) {
+  public void fill(int bucket, int size, boolean direct) {
     if (size <= 0 || bucket <= 0) return;
     int bucketSize = bucket * factor;
-    Bucket b = buckets.computeIfAbsent(bucketSize, newBucket);
+    Bucket b = (direct ? directs : heaps).computeIfAbsent(bucketSize, newBucket);
     for (int i=0; i<size; i++) {
-      if (!b.offer(ByteBuffer.allocate(bucketSize))) return;
+      if (!b.offer(newBuffer(direct, bucketSize))) return;
     }
   }
 
   public void clear() {
-    buckets.clear();
-  }
-
-
-  public static ByteBufferPool get() {
-    return INSTANCE;
+    heaps.clear();
+    directs.clear();
   }
 
 
@@ -126,8 +158,9 @@ public final class ByteBufferPool {
       for (;;) {
         int t = tail.get();
         int h = head.get();
-        if (((t + 1) % capacity) == h) return false; // Bucket full
-        if (tail.compareAndSet(t, (t + 1) % capacity)) {
+        int i = (t + 1) % capacity;
+        if (i == h) return false; // Bucket full
+        if (tail.compareAndSet(t, i)) {
           chunk.set(t, buf);
           return true;
         }
