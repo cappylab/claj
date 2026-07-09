@@ -19,77 +19,83 @@
 
 package com.xpdustry.claj.server;
 
-import java.lang.management.ManagementFactory;
+import java.lang.management.*;
 
 import com.sun.management.OperatingSystemMXBean;
 
 import arc.Core;
 import arc.util.OS;
-import arc.util.Time;
 
 import com.xpdustry.claj.common.status.ClajVersion;
 import com.xpdustry.claj.server.util.NetworkSpeed;
 
 
-/** Class that hold a summary of the current server state at his call. */
+/**
+ * Class that hold a summary of the current server state at his call. <br>
+ * To get more statistics and more accurate results, the summary will rely on java management interfaces.
+ */
 public class ClajStateSummary {
+  private static final RuntimeMXBean jvm = ManagementFactory.getRuntimeMXBean();
+  private static final MemoryMXBean mem = ManagementFactory.getMemoryMXBean();
+  private static final OperatingSystemMXBean cpu = ManagementFactory.getPlatformMXBean(OperatingSystemMXBean.class);
+
   public final ClajVersion version;
   public final int majorVersion;
   public final String javaVersion;
   public final long uptime;
-  public final int tps;
-  public final long usedHeap, allocatedHeap, reservedMemory;
+  public final int mainTps, netTps;
+  public final long usedHeap, allocatedHeap, maxHeap;
+  public final long usedRam, commitedRam, maxRam;
   /** in %. {@code -1} if unknown. */
   public final float javaCpuLoad, systemCpuLoad;
   public final int rooms, clients, connections;
-  /** This ignores Ethernet/IP/TCP/ArcNet headers. {@code -1} if disabled. */
+  /** This ignores Ethernet/IP/TCP headers. {@code -1} if disabled. */
   public final long uploadSpeed, downloadSpeed, totalUpload, totalDownload;
+  public final long uploadTransfert, downloadTransfert, totalTransfertUpload, totalTransfertDownload;
 
+  @SuppressWarnings("deprecation")
   ClajStateSummary() {
     version =  ClajVars.version;
     majorVersion = ClajVars.version.majorVersion;
     javaVersion = OS.javaVersion;
-    uptime = Time.timeSinceMillis(ClajVars.startedAt);
-    tps = Core.graphics.getFramesPerSecond();
-    usedHeap = Core.app.getJavaHeap();
-    allocatedHeap = Runtime.getRuntime().totalMemory();
-    reservedMemory = Runtime.getRuntime().maxMemory();
-    javaCpuLoad = CpuUsageGetter.processCpuLoad();
-    systemCpuLoad = CpuUsageGetter.cpuLoad();
+    uptime = jvm.getUptime();
+    mainTps = Core.graphics.getFramesPerSecond();
+    netTps = ClajVars.relay.getFramesPerSecond();
+
+    MemoryUsage usage = mem.getHeapMemoryUsage();
+    usedHeap = usage.getUsed();
+    allocatedHeap = usage.getCommitted();
+    maxHeap = usage.getMax();
+    usage = mem.getNonHeapMemoryUsage();
+    usedRam = usage.getUsed();
+    commitedRam = usage.getCommitted();
+    maxRam = usage.getMax();
+    javaCpuLoad = (float)(cpu.getProcessCpuLoad()*100);
+    systemCpuLoad = (float)(cpu.getSystemCpuLoad()*100);
+
     rooms = ClajVars.relay.rooms.size;
     clients = ClajVars.relay.clientsInRooms();
     connections = ClajVars.relay.getConnections().length;
+
     NetworkSpeed net = ClajVars.relay.networkSpeed;
     if (net != null) {
-      uploadSpeed = (long)net.uploadSpeed();
-      downloadSpeed = (long)net.downloadSpeed();
+      uploadSpeed = net.uploadSpeed();
+      downloadSpeed = net.downloadSpeed();
       totalUpload = net.totalUpload();
       totalDownload = net.totalDownload();
     } else {
       uploadSpeed = downloadSpeed = totalUpload = totalDownload = -1;
     }
-  }
-
-  /** In case of required classes are not present. */
-  private static class CpuUsageGetter {
-    private static Object bean;
-
-    public static float processCpuLoad() {
-      try {
-        if (bean == null) bean = ManagementFactory.getPlatformMXBean(OperatingSystemMXBean.class);
-        return (float)(((OperatingSystemMXBean)bean).getProcessCpuLoad()*100);
-      } catch (Throwable e) { return -1f; }
-    }
-
-    @SuppressWarnings("deprecation")
-    public static float cpuLoad() {
-      try {
-        if (bean == null) bean = ManagementFactory.getPlatformMXBean(OperatingSystemMXBean.class);
-        return (float)(((OperatingSystemMXBean)bean).getSystemCpuLoad()*100);
-      } catch (Throwable e) { return -1f; }
+    net = ClajVars.relay.packetCounter;
+    if (net != null) {
+      uploadTransfert = net.uploadSpeed();
+      downloadTransfert = net.downloadSpeed();
+      totalTransfertUpload = net.totalUpload();
+      totalTransfertDownload = net.totalDownload();
+    } else {
+      uploadTransfert = downloadTransfert = totalTransfertUpload = totalTransfertDownload = -1;
     }
   }
-
 
   public static ClajStateSummary now() {
     return new ClajStateSummary();

@@ -44,7 +44,8 @@ public class Main implements ApplicationListener {
     ClajVars.initLogger();
     if (!loadEnv(args)) System.exit(1);
 
-    app = new HeadlessApplication(new Main(), t -> {
+    //TODO: Run on 30fps instead of 60 since main job is done on network thread
+    app = new HeadlessApplication(new Main(), /*1f / 30f,*/ t -> {
       //TODO: crash handler
       Throwable disposeError = null, saveError = null;
       // Try to dispose properly
@@ -58,6 +59,7 @@ public class Main implements ApplicationListener {
         Log.err(t);
         Log.err("Server closed with error(s).");
       }
+
       if (disposeError != null || saveError != null) {
         Log.err("############### ALERT! ###############");
         Log.err("The CLaJ server has crashed and was unable to dispose properly.");
@@ -72,6 +74,7 @@ public class Main implements ApplicationListener {
         }
         Log.err("############### ALERT! ###############");
       }
+
       System.exit(1);
     });
   }
@@ -88,7 +91,7 @@ public class Main implements ApplicationListener {
 
     app.addListener(ClajVars.control = new ClajControl());
     app.addListener(ClajVars.plugins = new Plugins(ClajVars.pluginsDirectory, ClajVars.control));
-    app.addListener(ClajVars.relay = new ClajRelay(ClajVars.networkSpeed));
+    app.addListener(ClajVars.relay = new ClajRelay(true));
 
     app.post(() -> {
       isLoading = false;

@@ -61,7 +61,7 @@ public class ClajRoom implements NetListener {
   public final IntMap<ClajConnection> clientsMap = new IntMap<>(16);
   public final Seq<ClajConnection> clients = new Seq<>(false);
   /** For debugging, to know how many packets were transferred from a client to a host, and vice versa. */
-  public final NetworkSpeed transferredPackets = new NetworkSpeed(8);
+  public final NetworkSpeed transferredPackets = new NetworkSpeed();
   /** Room state rate-limit. New states will simply be discarded. */
   public final Ratekeeper stateRate = new Ratekeeper();
 
@@ -148,10 +148,6 @@ public class ClajRoom implements NetListener {
   /** Alerts the host that a client disconnected. This doesn't close the connection. */
   public void disconnected(ClajConnection connection, DcReason reason) {
     if (closed || connection == null) return;
-
-    // Don't forget to update packet speed, as this is calculated between receives
-    transferredPackets.uploadMark(0);
-    transferredPackets.downloadMark(0);
 
     if (isHost(connection) || !host.isConnected()) {
       Events.fire(new ConnectionLeftEvent(connection, this));

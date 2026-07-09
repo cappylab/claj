@@ -40,7 +40,7 @@ subprojects {
   }
 
   dependencies {
-    annotationProcessor "com.xpdustry:jabel:1.1.0"
+    annotationProcessor "com.xpdustry:jabel:1.1.1"
   }
 
   // Make fat jar
@@ -129,7 +129,7 @@ project(":server") {
     manifest.attributes["Main-Class"] = project.mainClassName
     manifest.attributes["Claj-Version"] = metadata.version
     //TODO: use arc-lite
-    //exclude "arc/assets/**", "arc/audio/**", "arc/input/**", "arc/scene/**", "arc/util/noise/**", "arc/util/viewport/**"
+    //exclude "arc/graphics/**", "arc/math/geom/**", "arc/net/dns/**", "arc/util/noise/**"
   }
 
   task run(type: JavaExec, dependsOn: classes) {

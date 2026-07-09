@@ -19,87 +19,64 @@
 
 package com.xpdustry.claj.server.util;
 
-import java.util.concurrent.atomic.AtomicLong;
-
-import arc.math.WindowedMean;
-import arc.util.Time;
-
 
 /** Calculate speed of an arbitrary thing, per seconds. E.g. network speed; in bytes per seconds. (thread-safe)*/
 public class NetworkSpeed {
   private static final long nanosPerSecond = 1_000_000_000;
 
-  protected final WindowedMean upload, download;
-  protected volatile long lastUpload, lastDownload;
-  protected final AtomicLong uploadAccum, downloadAccum, totalUpload, totalDownload;
+  protected final Object uploadLock = new Object(), dowloadLock = new Object();
+  protected long lastUpload, uploadSpeed, uploadAccum, totalUpload,
+                 lastDownload, downloadSpeed, downloadAccum, totalDownload;
 
-  public NetworkSpeed(int windowSec) {
-    upload = new WindowedMean(windowSec);
-    download = new WindowedMean(windowSec);
-    uploadAccum = new AtomicLong();
-    downloadAccum = new AtomicLong();
-    totalUpload = new AtomicLong();
-    totalDownload = new AtomicLong();
-    lastUpload = lastDownload = Time.nanos();
+  public void uploadMark() { uploadMark(1); }
+  public void uploadMark(int count) {
+    synchronized (uploadLock) {
+      uploadAccum += count;
+      totalUpload += count;
+
+      long time = System.nanoTime(), diff = time - lastUpload;
+      if (diff >= nanosPerSecond) {
+        uploadSpeed = uploadAccum * nanosPerSecond / diff;
+        uploadAccum = 0;
+        lastUpload = time;
+      }
+    }
   }
 
   public void downloadMark() { downloadMark(1); }
   public void downloadMark(int count) {
-    long time = Time.nanos();
-    if (time - lastDownload >= nanosPerSecond) {
-      synchronized (download) {
-        if (time - lastDownload >= nanosPerSecond) { // Be sure
-          // Fill holes between calls
-          while (time - lastDownload >= nanosPerSecond) {
-            download.add(downloadAccum.getAndSet(0));
-            lastDownload += nanosPerSecond;
-          }
-        }
-      }
-    }
-    downloadAccum.getAndAdd(count);
-    totalDownload.getAndAdd(count);
-  }
+    synchronized (dowloadLock) {
+      downloadAccum += count;
+      totalDownload += count;
 
-  public void uploadMark() { uploadMark(1); }
-  public void uploadMark(int count) {
-    long time = Time.nanos();
-    if (time - lastUpload >= nanosPerSecond) {
-      synchronized (upload) {
-        if (time - lastUpload >= nanosPerSecond) { // Be sure
-          // Fill holes between calls
-          while (time - lastUpload >= nanosPerSecond) {
-            upload.add(uploadAccum.getAndSet(0));
-            lastUpload += nanosPerSecond;
-          }
-        }
+      long time = System.nanoTime(), diff = time - lastDownload;
+      if (diff >= nanosPerSecond) {
+        downloadSpeed = downloadAccum * nanosPerSecond / diff;
+        downloadAccum = 0;
+        lastDownload = time;
       }
-    }
-    uploadAccum.getAndAdd(count);
-    totalUpload.getAndAdd(count);
-  }
-
-  /** Number of things per second. E.g. bytes per seconds */
-  public float downloadSpeed() {
-    synchronized (download) {
-      return download.mean();
     }
   }
 
   /** Number of things per second. E.g. bytes per seconds */
-  public float uploadSpeed() {
-    synchronized (upload) {
-      return upload.mean();
-    }
+  public long uploadSpeed() {
+    uploadMark(0); // Try to fill holes
+    return uploadSpeed;
   }
 
-  /** Total number of things. E.g. total bytes */
-  public long totalDownload() {
-    return totalDownload.get();
+  /** Number of things per second. E.g. bytes per seconds. */
+public long downloadSpeed() {
+    downloadMark(0); // Try to fill holes
+    return downloadSpeed;
   }
 
   /** Total number of things. E.g. total bytes */
   public long totalUpload() {
-    return totalUpload.get();
+    return totalUpload;
+  }
+
+  /** Total number of things. E.g. total bytes */
+  public long totalDownload() {
+    return totalDownload;
   }
 }

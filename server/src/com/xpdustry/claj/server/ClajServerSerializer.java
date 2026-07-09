@@ -77,16 +77,18 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
 
   protected final ThreadLocal<ByteBufferInput> read = Threads.local(ByteBufferInput::new);
   protected final ThreadLocal<ByteBufferOutput> write = Threads.local(ByteBufferOutput::new);
-  protected final NetworkSpeed networkSpeed;
+  public NetworkSpeed networkSpeed, packetCounter;
 
-  /** @param networkSpeed is for debugging, sets to null to disable it */
-  public ClajServerSerializer(NetworkSpeed networkSpeed) {
+  ClajServerSerializer() {}
+  public ClajServerSerializer(NetworkSpeed networkSpeed, NetworkSpeed packetCounter) {
     this.networkSpeed = networkSpeed;
+    this.packetCounter = packetCounter;
   }
 
   @Override
   public Object read(ByteBuffer buffer) {
     if (networkSpeed != null) networkSpeed.downloadMark(buffer.remaining() + getLengthLength());
+    if (packetCounter != null) packetCounter.downloadMark();
     return switch (buffer.get()) {
       case ClajNet.frameworkId -> readFramework(buffer);
       case ClajNet.oldId -> readString(buffer);
@@ -129,6 +131,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
       default -> throw new ArcNetException("Unknown packet type: " + object.getClass().getName());
     }
     if (networkSpeed != null) networkSpeed.uploadMark(buffer.position() - lastPos + getLengthLength());
+    if (packetCounter != null) packetCounter.uploadMark();
   }
 
   public void writeClaj(ByteBuffer buffer, Packet packet) {

@@ -21,9 +21,12 @@ package com.xpdustry.claj.server;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.reflect.Field;
 import java.net.BindException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedSelectorException;
+import java.util.Collections;
+import java.util.Set;
 
 import arc.*;
 import arc.math.Mathf;
@@ -41,6 +44,7 @@ import com.xpdustry.claj.common.util.AddressUtil;
 import com.xpdustry.claj.common.util.ByteBufferPool;
 import com.xpdustry.claj.common.util.Strings;
 import com.xpdustry.claj.server.ClajEvents.*;
+import com.xpdustry.claj.server.util.CompatibleObjectSet;
 import com.xpdustry.claj.server.util.NetworkSpeed;
 
 
@@ -48,7 +52,7 @@ import com.xpdustry.claj.server.util.NetworkSpeed;
 public class ClajRelay extends Server implements ApplicationListener {
   protected boolean closed;
   /** Read/Write speed. */
-  public final NetworkSpeed networkSpeed;
+  public final NetworkSpeed networkSpeed, packetCounter;
   /** Server packet receiver. */
   protected final ServerReceiver receiver;
   /** Server routines that manages cache and cleaning things. */
@@ -70,12 +74,17 @@ public class ClajRelay extends Server implements ApplicationListener {
   /** Empty room list to send to client requesting no type or a not found one. */
   private final RoomListPacket emptyList = new RoomListPacket().clear(true);
 
-  public ClajRelay() { this(null); }
-  public ClajRelay(NetworkSpeed speedCalculator) {
-    super(131072, 32768, new ClajServerSerializer(speedCalculator));
-    networkSpeed = speedCalculator;
-    receiver = new ServerReceiver(this, Core.app::post);
+  public ClajRelay() { this(false); }
+  public ClajRelay(boolean withCounters) { this(new ClajServerSerializer(), withCounters); }
+  ClajRelay(ClajServerSerializer serializer, boolean withCounters) {
+    super(/*131072*/32768, 32768, serializer);
+    if (withCounters) {
+      serializer.networkSpeed = networkSpeed = new NetworkSpeed();
+      serializer.packetCounter = packetCounter = new NetworkSpeed();
+    } else networkSpeed = packetCounter = null;
+    receiver = new ServerReceiver(this, /*Core.app::post*/null);
     routines = new ClajRoutines();
+
 
     // Preload first and second buckets of buffer pool
     ByteBufferPool.get().fill(1);
@@ -85,6 +94,38 @@ public class ClajRelay extends Server implements ApplicationListener {
     // But in theory, it doesn't really matter, as for an host, everything will work fine.
     // And for a client, it will not be able to join a room, and will have to reconnect.
     Reflect.<IntMap<Connection>>get(Server.class, this, "pendingConnections").put(ClajRoom.CON_BROADCAST, null);
+
+    // Optimize selector by one that does not allocate nodes and iterators
+    try {
+      Object selector = Reflect.get(Server.class, this, "selector");
+      Class<?> clazz = selector.getClass();
+      while (!"SelectorImpl".equals(clazz.getSimpleName()) && clazz != Object.class) clazz = clazz.getSuperclass();
+      Field skf = clazz.getDeclaredField("selectedKeys"), pskf = clazz.getDeclaredField("publicSelectedKeys");
+      Set<Object> skv = new CompatibleObjectSet<>(), pskv = Collections.checkedSet(skv, Object.class);
+      try {
+        skf.setAccessible(true);
+        skf.set(selector, skv);
+        pskf.setAccessible(true);
+        pskf.set(selector, pskv);
+      } catch (Exception e) {
+        try {
+          // Try with unsafe
+          Object unsafe = Reflect.get(Class.forName("sun.misc.Unsafe"), "theUnsafe");
+          long sko = Reflect.invoke(unsafe, "objectFieldOffset", new Object[] {skf}, Field.class);
+          Reflect.invoke(unsafe, "putObject", new Object[] {selector, sko, skv},
+                         Object.class, long.class, Object.class);
+          long psko = Reflect.invoke(unsafe, "objectFieldOffset", new Object[] {pskf}, Field.class);
+          Reflect.invoke(unsafe, "putObject", new Object[] {selector, psko, pskv},
+                         Object.class, long.class, Object.class);
+        } catch (Exception e1) {
+          throw e; // Throw first try instead
+        }
+      }
+      Log.info("&gSelector optimized successfully.");
+    } catch (Exception e) {
+      Log.err("Unable to optimize selector: @. Skipping...", e.toString());
+    }
+
 
     setDiscoveryHandler((_, r) -> {
       if (versionBuff == null)
@@ -97,6 +138,7 @@ public class ClajRelay extends Server implements ApplicationListener {
       public boolean disconnected(Connection connection, DcReason reason) { return isDisconnectAllowed(connection, reason); }
       public boolean received(Connection connection, Object object) { return isReceiveAllowed(connection, object); }
     });
+
 
     receiver.handle(Connect.class, c -> onConnect(toClajCon(c)));
     receiver.handle(Disconnect.class, (c, p) -> onDisconnect(toClajCon(c), p.reason));
@@ -177,12 +219,6 @@ public class ClajRelay extends Server implements ApplicationListener {
     // Reset streams if needed
     if (StreamReceiver.has(connection))
       Core.app.post(() -> StreamReceiver.reset(connection));
-
-    // Because speed is calculated at reception, if there is no traffic, the values remains stuck at last update
-    if (networkSpeed != null) {
-      networkSpeed.uploadMark(0);
-      networkSpeed.downloadMark(0);
-    }
 
     // Avoid searching for a room if it was an invalid connection or just a ping
     return valid;
@@ -542,6 +578,34 @@ public class ClajRelay extends Server implements ApplicationListener {
   }
 
   // end region
+  // region frames calculation
+
+  // This is a reimplementation of MockGraphics
+  private long lastFrame;
+  private int frames, fps;
+
+  protected void updateTime(int timeout) {
+    long time = System.nanoTime();
+    if (time - lastFrame >= 1000000000) {
+      fps = frames;
+      frames = 0;
+      lastFrame = time;
+    }
+    frames++;
+  }
+
+  public int getFramesPerSecond() {
+    return fps;
+  }
+
+  @Override
+  public void update(int timeout) throws IOException {
+    super.update(timeout);
+    updateTime(timeout);
+  }
+
+
+  // end region
   // region hosting
 
   @Override
@@ -707,13 +771,12 @@ public class ClajRelay extends Server implements ApplicationListener {
   public boolean addClient(ClajRoom room, ClajConnection con) {
     if (con == null || room == null) return false;
     int clients = room.clients(); // because all clients will be kicked before cleaning cache
-    clientsInRooms++;
     room.connected(con);
     if (room.isClosed()) {
-      clientsInRooms -= clients + 1;
+      clientsInRooms -= clients;
       closeRoom(room);
       return false;
-    }
+    } else clientsInRooms++;
     setRoomAfk(room, false);
     return true;
   }
@@ -727,14 +790,14 @@ public class ClajRelay extends Server implements ApplicationListener {
     ClajRoom room = con.currentRoom();
     if (room == null) return false;
     boolean wasHost = con.isRoomHost();
-    int clients = room.clients() - 1; // because all clients can be kicked before cleaning cache
-    clientsInRooms--;
+    int clients = room.clients(); // because all clients can be kicked before cleaning cache
 
     if (quiet) room.disconnectedQuietly(con, reason);
     else room.disconnected(con, reason);
 
     // Close the room if it was the host
     if (!wasHost && !room.isClosed()) {
+      clientsInRooms--;
       setRoomAfk(room, true);
     } else {
       clientsInRooms -= clients;

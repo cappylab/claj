@@ -31,13 +31,9 @@ import arc.util.Strings;
 
 import com.xpdustry.claj.common.status.ClajVersion;
 import com.xpdustry.claj.server.plugin.Plugins;
-import com.xpdustry.claj.server.util.*;
 
 
 public class ClajVars {
-  /** Used to calculate uptime. */
-  public static final long startedAt = System.currentTimeMillis();
-
   public static ClajRelay relay;
   public static ClajControl control;
 
@@ -48,7 +44,6 @@ public class ClajVars {
   public static Fi pluginsDirectory = workingDirectory.child("plugins");
 
   public static Plugins plugins;
-  public static NetworkSpeed networkSpeed = new NetworkSpeed(8);
 
   public static final String[] tags = {"&lc&fb[D]&fr", "&lb&fb[I]&fr", "&ly&fb[W]&fr", "&lr&fb[E]", ""};
   public static DateTimeFormatter logDateformat = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss");

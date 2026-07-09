@@ -24,7 +24,6 @@ import java.util.Scanner;
 import arc.ApplicationListener;
 import arc.Core;
 import arc.Events;
-import arc.math.Mathf;
 import arc.util.CommandHandler;
 import arc.util.Log;
 import arc.util.Threads;
@@ -121,9 +120,12 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
       Log.info("CLaJ Node Status:");
       Log.info("&lk|&fr Version: CLaJ @ (@), Java @", state.version, state.majorVersion, state.javaVersion);
       Log.info("&lk|&fr Uptime: @", Strings.formatDuration(state.uptime, true));
-      Log.info("&lk|&fr TPS: @", state.tps);
-      Log.info("&lk|&fr RAM: @ / @ (@)", Strings.formatBytes(state.usedHeap), Strings.formatBytes(state.allocatedHeap),
-                                         Strings.formatBytes(state.reservedMemory));
+      Log.info("&lk|&fr Main TPS: @", state.mainTps);
+      Log.info("&lk|&fr Net TPS: @", state.netTps);
+      Log.info("&lk|&fr Heap: @ / @ (@)", Strings.formatBytes(state.usedHeap), Strings.formatBytes(state.allocatedHeap),
+               Strings.formatBytes(state.maxHeap));
+      Log.info("&lk|&fr Non-Heap: @ / @ (@)", Strings.formatBytes(state.usedRam), Strings.formatBytes(state.commitedRam),
+               Strings.formatBytes(state.maxRam));
       Log.info("&lk|&fr CPU: @ (@)", String.format("%.2f%%", state.javaCpuLoad),
                String.format("%.2f%%", state.systemCpuLoad));
       Log.info("&lk|&fr Load: @ rooms, @ clients, @ connections.", state.rooms, state.clients, state.connections);
@@ -131,9 +133,11 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
         Log.info("&lk|&fr Network speed calculator is disabled.");
         return;
       }
-      Log.info("&lk|&fr Network: @/s up, @/s down (@ up, @ down)", Strings.formatBytes(state.uploadSpeed),
+      Log.info("&lk|&fr Network: @/s s up, @/s down (@ up, @ down)", Strings.formatBytes(state.uploadSpeed),
                Strings.formatBytes(state.downloadSpeed), Strings.formatBytes(state.totalUpload),
                Strings.formatBytes(state.totalDownload));
+      Log.info("&lk|&fr Packets: @ p/s up, @ p/s down (@ up, @ down)", state.uploadTransfert, state.downloadTransfert,
+               state.totalTransfertUpload, state.totalTransfertDownload);
     });
 
     register("gc", "Trigger a garbage collection.", args -> {
@@ -148,6 +152,7 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
       else Log.err("There is nothing to say yes to.");
     });
 
+    //TODO: add argument to delay closure or waits until all room closed
     register("exit", "Stop the server.", args -> {
       Log.info("Shutting down CLaJ server.");
       ClajVars.relay.stop(Core.app::exit);
@@ -200,7 +205,7 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
           Log.info("&lk|&fr @: @ client" + (r.isEmpty() ? "" : "s") +
                    " (@). @ p/s in, @ p/s out (@ in, @ out).",
                    r.sid, r.clients() + 1, Strings.formatDuration(Time.timeSinceMillis(r.createdAt), true),
-                   Mathf.ceil(n.uploadSpeed()), Mathf.ceil(n.downloadSpeed()), n.totalUpload(), n.totalDownload());
+                   n.uploadSpeed(), n.downloadSpeed(), n.totalUpload(), n.totalDownload());
         });
 
       } else {
