@@ -66,7 +66,8 @@ public class ClajProxy extends ProxyClient {
   private long broadcastTestStart, broadcastTestTimeout = 1000;
 
   public ClajProxy(ClajProvider provider) {
-    super(32768, 16384, new ClajClientSerializer(), null);
+    // Keep a big write buffer in case of a big traffic, ProxyClient will block if nearly full
+    super(131072, 32768, new ClajClientSerializer());
     this.provider = provider;
     conListener = provider.getConnectionListener(this);
     errorHandler = e -> provider.handleProxyError(this, e);
@@ -291,8 +292,7 @@ public class ClajProxy extends ProxyClient {
 
   @Override
   protected Packet makeConWrapPacket(int conId, Object object, boolean tcp) {
-    // In theory a client can run multiple proxies in parallel, so keep that safe
-    ConnectionPayloadPacket p = ClajNet.newLocalPacket(cpp, false);
+    ConnectionPayloadPacket p = ClajNet.newLocalPacket(cpp);
     p.conID = conId;
     p.isTCP = tcp;
     p.object = object;
@@ -301,8 +301,7 @@ public class ClajProxy extends ProxyClient {
 
   @Override
   protected Packet makeConClosePacket(int conId, DcReason reason) {
-    // In theory a client can run multiple proxies in parallel, so keep that safe
-    ConnectionClosedPacket p = ClajNet.newLocalPacket(ccp, false);
+    ConnectionClosedPacket p = ClajNet.newLocalPacket(ccp);
     p.conID = conId;
     p.reason = reason;
     return p;

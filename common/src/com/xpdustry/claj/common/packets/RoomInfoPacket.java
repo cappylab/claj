@@ -33,13 +33,13 @@ public class RoomInfoPacket extends RoomStatePacket {
   public int maxClients;
 
   @Override
-  protected void readImpl(ByteBufferInput read) {
+  public void read(ByteBufferInput read) {
     roomId = read.readLong();
     isProtected = read.readBoolean();
     type = ClajType.read(read);
     clients = read.readChar();
     maxClients = read.readChar();
-    super.readImpl(read);
+    super.read(read);
   }
 
   @Override

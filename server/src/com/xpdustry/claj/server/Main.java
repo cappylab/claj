@@ -20,10 +20,7 @@
 package com.xpdustry.claj.server;
 
 import arc.ApplicationListener;
-import arc.Core;
 import arc.Events;
-import arc.backend.headless.HeadlessApplication;
-import arc.mock.MockSettings;
 import arc.util.Log;
 
 import com.xpdustry.claj.common.ClajPackets;
@@ -34,7 +31,7 @@ import com.xpdustry.claj.server.util.Autosaver;
 
 public class Main implements ApplicationListener {
   public static String[] args;
-  public static HeadlessApplication app;
+  public static ServerApplication app;
   public static boolean isLoading;
 
   public static void main(String[] args) {
@@ -44,8 +41,7 @@ public class Main implements ApplicationListener {
     ClajVars.initLogger();
     if (!loadEnv(args)) System.exit(1);
 
-    //TODO: Run on 30fps instead of 60 since main job is done on network thread
-    app = new HeadlessApplication(new Main(), /*1f / 30f,*/ t -> {
+    app = new ServerApplication(new Main(), t -> {
       //TODO: crash handler
       Throwable disposeError = null, saveError = null;
       // Try to dispose properly
@@ -81,9 +77,7 @@ public class Main implements ApplicationListener {
 
   @Override
   public void init() {
-    // We do not uses default settings system
-    Core.settings = new MockSettings();
-
+    ClajConfig.serverVersion = ClajVars.version.majorVersion;
     ClajConfig.load();
     Log.level = ClajConfig.debug.get() ? Log.LogLevel.debug : Log.LogLevel.info; // set log level
     ClajPackets.init();
@@ -91,7 +85,7 @@ public class Main implements ApplicationListener {
 
     app.addListener(ClajVars.control = new ClajControl());
     app.addListener(ClajVars.plugins = new Plugins(ClajVars.pluginsDirectory, ClajVars.control));
-    app.addListener(ClajVars.relay = new ClajRelay(true));
+    app.addListener(ClajVars.relay = new ClajRelay(ClajVars.port, true));
 
     app.post(() -> {
       isLoading = false;

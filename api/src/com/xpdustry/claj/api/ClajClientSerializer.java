@@ -35,14 +35,6 @@ import com.xpdustry.claj.common.packets.RawPacket;
 
 
 public class ClajClientSerializer implements NetSerializer, FrameworkSerializer {
-  /**
-   * Since {@link ClajProxy} and {@link ClajPinger} currently process packets on the same thread
-   * without delaying to the main thread, this option can be safely set to {@code true}. <br>
-   * If you're making a custom implementation or changing packet handling,
-   * remember to set that to {@code false} to avoid any corruption. This will globally disable packet reuse.
-   */
-  public static boolean REUSE_PACKETS = true;
-
   protected final ThreadLocal<ByteBufferInput> read = Threads.local(ByteBufferInput::new);
   protected final ThreadLocal<ByteBufferOutput> write = Threads.local(ByteBufferOutput::new);
 
@@ -61,8 +53,7 @@ public class ClajClientSerializer implements NetSerializer, FrameworkSerializer 
   }
 
   public Packet readClaj(ByteBuffer buffer) {
-    byte id = buffer.get();
-    Packet packet = REUSE_PACKETS ? ClajNet.newLocalPacket(id) : ClajNet.newPacket(id);
+    Packet packet = ClajNet.newLocalPacket(buffer.get());
     if(!packet.allow(false)) throw new ArcNetException("Invalid packet type for endpoint: " + packet.getClass());
     ByteBufferInput in = read.get();
     in.buffer = buffer;

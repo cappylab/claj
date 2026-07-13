@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 
 import arc.util.io.ByteBufferInput;
 import arc.util.io.ByteBufferOutput;
-import com.xpdustry.claj.common.util.ByteBufferPool;
 
 
 /**
@@ -31,81 +30,53 @@ import com.xpdustry.claj.common.util.ByteBufferPool;
  * This is only needed due to compatibility with receivers.
  */
 public class RawPacket implements Packet {
-  protected volatile ByteBuffer data;
-  protected volatile boolean pooled;
-  /** Auto-{@link #free} {@link #data} after {@link #write} call. */
-  public boolean autoFree = true;
+  private static final ByteBuffer EMPTY = ByteBuffer.allocate(0);
+  protected ByteBuffer first = EMPTY, second = EMPTY;
+  protected boolean flipped;
 
-  public RawPacket() {}
-  public RawPacket(ByteBuffer buffer) { this(buffer, false); }
-  /** if {@code pooled}, {@link #free()} must be called after use, {@link #data} will be cleared. */
-  public RawPacket(ByteBuffer buffer, boolean pooled) {
-    this.pooled = pooled;
-    this.data = copyRemaining(buffer, pooled);
-  }
-  public RawPacket(ByteBufferInput read) { this(read, false); }
-  /** if {@code pooled}, {@link #free()} must be called after use, {@link #data} will be cleared. */
-  public RawPacket(ByteBufferInput read, boolean pooled) {
-    this.pooled = pooled;
-    this.data = copyRemaining(read, pooled);
+  public RawPacket read(ByteBuffer buffer) {
+    ByteBuffer buf = flipIfNeeded(buffer.capacity());
+    buf.clear();
+    buf.put(buffer).flip();
+    return this;
   }
 
   @Override
   public void read(ByteBufferInput read) {
-    if (data == null) data = copyRemaining(read);
-    else ((ByteBuffer)data.clear()).put(read.buffer).flip();
+    read(read.buffer);
   }
 
   @Override
   public void write(ByteBufferOutput write) {
-    // As we have a GC, this not very important if we miss some buffer to release
-    // E.g. when the socket become closed before writing into
-    if (autoFree) {
-      try { write(data, write); }
-      finally { free(); }
-    } else write(data, write);
+    write(first, write);
+  }
+
+  public ByteBuffer flipIfNeeded(int capacity) {
+    ByteBuffer buf = data();
+    if (buf.capacity() == capacity) return buf;
+    flipped ^= true;
+    buf = data();
+    if (buf.capacity() == capacity) return buf;
+    buf = ByteBuffer.allocate(capacity);
+    if (flipped) second = buf;
+    else first = buf;
+    return buf;
   }
 
   public ByteBuffer data() {
-    return data;
+    return flipped ? second : first;
   }
-
-  public boolean pooled() {
-    return pooled;
-  }
-
-  public void free() {
-    boolean pooled = this.pooled;
-    this.pooled = false;
-    ByteBuffer data = this.data;
-    this.data = null;
-    if (pooled && data != null) ByteBufferPool.free(data);
-  }
-
-  // Helpers
 
   public RawPacket copy() {
-    return new RawPacket(data, pooled);
+    return new RawPacket().read(data());
   }
 
-  public static ByteBuffer copyRemaining(ByteBufferInput in) { return copyRemaining(in, false); }
-  public static ByteBuffer copyRemaining(ByteBufferInput in, boolean pooled) {
-    return copyRemaining(in.buffer, pooled);
-  }
-  public static ByteBuffer copyRemaining(ByteBuffer src) { return copyRemaining(src, false); }
-  /** if {@code pooled}, {@link ByteBufferPool#free()} must be called after use. */
-  public static ByteBuffer copyRemaining(ByteBuffer src, boolean pooled) {
-    int len = src.remaining();
-    ByteBuffer data = pooled ? ByteBufferPool.getDirect(len) : ByteBuffer.allocateDirect(len);
-    data.put(src).flip();
-    return data;
-  }
 
-  public static ByteBuffer read(ByteBufferInput read, int length) { return read(read, length, false); }
-  public static ByteBuffer read(ByteBufferInput read, int length, boolean pooled) {
+  public static ByteBuffer readAll(ByteBufferInput read) { return read(read, read.buffer.remaining()); }
+  public static ByteBuffer read(ByteBufferInput read, int length) {
     byte[] data = new byte[length];
     read.readFully(data);
-    return pooled ? ByteBufferPool.getHeap(length).put(data) : ByteBuffer.wrap(data);
+    return ByteBuffer.wrap(data);
   }
 
   /** Suppresses {@code src} reading. Optimized for backed array buffers. */

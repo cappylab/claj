@@ -49,7 +49,7 @@ public class ClajStateSummary {
   /** in %. {@code -1} if unknown. */
   public final float javaCpuLoad, systemCpuLoad;
   public final int rooms, clients, connections;
-  /** This ignores Ethernet/IP/TCP headers. {@code -1} if disabled. */
+  /** This ignores Ethernet/IP/TCP/ArcNet headers. {@code -1} if disabled. */
   public final long uploadSpeed, downloadSpeed, totalUpload, totalDownload;
   public final long uploadTransfert, downloadTransfert, totalTransfertUpload, totalTransfertDownload;
 

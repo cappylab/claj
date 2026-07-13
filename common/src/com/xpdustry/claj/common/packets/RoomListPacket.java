@@ -28,7 +28,7 @@ import arc.util.io.ByteBufferOutput;
 
 
 /** Can be a huge packet, should be sent with {@link StreamSender} instead. */
-public class RoomListPacket extends DelayedPacket {
+public class RoomListPacket implements Packet {
   public final LongMap<ByteBuffer> states = new LongMap<>();
   public final ObjectSet<Long> protectedRooms = new ObjectSet<>(32);
   //TODO: add clients and maxClients info
@@ -44,7 +44,7 @@ public class RoomListPacket extends DelayedPacket {
   }
 
   @Override
-  protected void readImpl(ByteBufferInput read) {
+  public void read(ByteBufferInput read) {
     for (int i=0, n=read.readInt(); i<n; i++) {
       long room = read.readLong();
       if (read.readBoolean()) protectedRooms.add(room);

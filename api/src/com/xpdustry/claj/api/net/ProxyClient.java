@@ -30,6 +30,7 @@ import arc.util.Structs;
 
 import com.xpdustry.claj.common.ClajPackets.Disconnect;
 import com.xpdustry.claj.common.net.ClientReceiver;
+import com.xpdustry.claj.common.net.NetListenerFilter;
 
 
 /**
@@ -63,9 +64,9 @@ public abstract class ProxyClient extends Client {
   protected Cons<Throwable> errorHandler;
 
   /** Packet queue to avoid a buffer overflow. */
-  protected final Queue<Object> packetQueue = new Queue<>();
   protected int writeBufferThreshold;
-  protected volatile boolean hasQueued = false; // used for fast check
+  private final Object waitLock = new Object();
+  private volatile boolean waitingForWrite;
 
   /**
    * Whether to force using the tcp connection when sending trough udp to the server. <br>
@@ -81,17 +82,14 @@ public abstract class ProxyClient extends Client {
    */
   public boolean broadcastSupported = true;
 
-  public ProxyClient(int writeBufferSize, int objectBufferSize, NetSerializer serialization,
-                     Cons<Runnable> taskPoster) {
+  public ProxyClient(int writeBufferSize, int objectBufferSize, NetSerializer serialization) {
     super(writeBufferSize, objectBufferSize, serialization);
-    receiver = new ClientReceiver(this, taskPoster);
-    writeBufferThreshold = (int)(writeBufferSize * 0.9f);
-    setIdleThreshold(0.2f);
+    receiver = new ClientReceiver(this, NetListenerFilter.noIdleFilter);
+    writeBufferThreshold = (int)(writeBufferSize * 0.95f);
 
     receiver.handle(Disconnect.class, _ -> {
       Throwable error = getLastProtocolError();
       if (error != null && errorHandler != null) errorHandler.get(error);
-      clearPaquetQueue();
       //also close virtual connections?
     });
   }
@@ -125,7 +123,13 @@ public abstract class ProxyClient extends Client {
     updatePing();
     super.update(timeout);
     updateIdle();
-    if (isIdle()) flushPacketQueue(); // only flush when idle to avoid ping-pong
+
+    // Only signal at idle, to avoid ping-pong
+    if (isIdle() && waitingForWrite) {
+      synchronized (waitLock) {
+        waitLock.notifyAll();
+      }
+    }
   }
 
   /** Tries to mimic connection idling. */
@@ -190,13 +194,11 @@ public abstract class ProxyClient extends Client {
       closeAllConnections(reason);
     }
     super.close(reason);
-    clearPaquetQueue();
     broadcastSupported = true;
     closing = false;
   }
 
   public void closeAllConnections(DcReason reason) {
-    if (isConnected()) flushPacketQueue(); // flush queue one last time, in case of
     for (VirtualConnection c : getConnections()) {
       boolean wasConnected = c.isConnected();
       c.setConnected0(false);
@@ -325,9 +327,8 @@ public abstract class ProxyClient extends Client {
   /** @return never {@code null}. */
   protected VirtualConnection conConnected(int conId, long addressHash) {
     VirtualConnection con = getConnection(conId);
-    boolean stale = false;
-    if (con == null || (stale = isStale(con))) {
-      if (stale) clearStales(); // Clear stale connections now to avoid a duplicate
+    if (con == null) {
+      clearStales(); // Clear stale connections now to avoid a duplicate
       con = new VirtualConnection(this, conId, addressHash);
       if (conListener != null) con.addListener(conListener);
       addConnection(con);
@@ -363,42 +364,26 @@ public abstract class ProxyClient extends Client {
   protected abstract Object makeConClosePacket(int conId, DcReason reason);
 
 
-  //FIXME: dangerous as everything assumes that packets are serialized in-place.
-  // Do we make waiting or a growable buffer?
+  //TODO: to test
   /**
    * Because all {@link VirtualConnection}s shares the same tcp buffer, it can be filled quickly. <br>
-   * This tries to queue packets when needed, to avoid overflows.
+   * This will slow down sends when the write buffer reaches a threshold.
    */
   @Override
   public int sendTCP(Object object) {
-    // Fast path
-    if (!hasQueued && getTcpWriteBufferSize() <= writeBufferThreshold)
-      return super.sendTCP(object);
-
-    synchronized (packetQueue) {
-      if (hasQueued || getTcpWriteBufferSize() > writeBufferThreshold) {
-        packetQueue.add(object);
-        hasQueued = true;
-        return 0;
+    // Heuristic: just check for enough space assuming packets are not so big.
+    // For future, override directly TcpConnection#send, to make waiting at buffer
+    // overflow and retry each socket writes.
+    if (getTcpWriteBufferSize() <= writeBufferThreshold) return super.sendTCP(object);
+    synchronized (waitLock) {
+      waitingForWrite = true;
+      int waits = 20;
+      while (getTcpWriteBufferSize() > writeBufferThreshold && waits-- > 0 ) {
+        try { waitLock.wait(100); } // Only wait for 100ms and 20 times to avoid dead-locks
+        catch (InterruptedException _) {}
       }
-    }
-    return super.sendTCP(object);
-  }
-
-  private void flushPacketQueue() {
-    if (!hasQueued) return; // fast check
-    synchronized (packetQueue) {
-      arc.util.Log.debug("queue.size=@; flushable=@", packetQueue.size, getTcpWriteBufferSize() <= writeBufferThreshold);
-      while (!packetQueue.isEmpty() && getTcpWriteBufferSize() <= writeBufferThreshold)
-        super.sendTCP(packetQueue.removeFirst());
-      hasQueued = !packetQueue.isEmpty();
-    }
-  }
-
-  private void clearPaquetQueue() {
-    synchronized (packetQueue) {
-      packetQueue.clear();
-      hasQueued = false;
+      waitingForWrite = false;
+      return super.sendTCP(object);
     }
   }
 }

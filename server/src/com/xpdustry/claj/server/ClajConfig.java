@@ -349,6 +349,9 @@ public class ClajConfig {
       """.trim()
   ).reverse();
 
+  /** Must be set at initialization and not modified after. {@code -1} means not initialized. */
+  public static int serverVersion = -1;
+
   public static Field<Boolean> debug = new Field<>("debug", fieldDescs.pop(), false, v ->
                                                    Log.level = v ? Log.LogLevel.debug : Log.LogLevel.info);
   public static Field<Integer> maxConnections = new Field<>("max-connections", fieldDescs.pop(), 1<<23);
@@ -378,5 +381,5 @@ public class ClajConfig {
   public static SetField<String> blacklist = new SetField<>("blacklist", "", String.class, ObjectSet::new);
   public static SetField<ClajType> typeBlacklist = new SetField<>("type-blacklist", "", ClajType.class, ObjectSet::new);
 
-  static { fieldDescs.shrink(); } // remove cached fields desc
+  static { fieldDescs = null; } // remove cached desc fields
 }

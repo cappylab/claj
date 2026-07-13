@@ -24,7 +24,6 @@ import arc.func.Cons2;
 import arc.net.*;
 import arc.struct.ObjectMap;
 import arc.util.Log;
-
 import com.xpdustry.claj.common.ClajPackets.*;
 import com.xpdustry.claj.common.net.stream.StreamPacket;
 import com.xpdustry.claj.common.net.stream.StreamReceiver;
@@ -35,16 +34,14 @@ import com.xpdustry.claj.common.util.AddressUtil;
 /** A server listener that can delegate packet decoding and reception to the main app. */
 public class ServerReceiver implements NetListener {
   protected final ObjectMap<Class<?>, Cons2<Connection, ?>> listeners = new ObjectMap<>(32);
-  protected Cons<Runnable> delegator;
   protected Cons<Throwable> errorHandler;
   protected NetListenerFilter filter;
 
-  /** Receive will not be delegated. */
-  public ServerReceiver(EndPoint server) { this(server, null); }
-  public ServerReceiver(EndPoint server, Cons<Runnable> delegator) {
-    this.delegator = delegator;
-    this.filter = NetListenerFilter.defaultFilter;
-    this.errorHandler = Log::err;
+  public ServerReceiver(EndPoint server) { this(server, NetListenerFilter.defaultFilter); }
+  public ServerReceiver(EndPoint server, NetListenerFilter filter) { this(server, filter, Log::err); }
+  public ServerReceiver(EndPoint server, NetListenerFilter filter, Cons<Throwable> errorHandler) {
+    setFilter(filter);
+    setErrorHandler(errorHandler);
     server.addListener(this);
   }
 
@@ -60,38 +57,33 @@ public class ServerReceiver implements NetListener {
 
   @Override
   public void connected(Connection connection) {
-    if (!filter.connected(connection)) return;
+    if (!filter.allowConnected(connection)) return;
     Connect packet = new Connect();
     packet.address = AddressUtil.getString(connection);
-    delegateReceive(connection, packet);
+    receive(connection, packet);
   }
 
   @Override
   public void disconnected(Connection connection, DcReason reason) {
-    if (!filter.disconnected(connection, reason)) return;
-    delegateReceive(connection, Disconnect.get(reason));
+    if (!filter.allowDisconnected(connection, reason)) return;
+    receive(connection, Disconnect.get(reason));
   }
 
   @Override
   public void received(Connection connection, Object object) {
-    if (!filter.received(connection, object)) return;
+    if (!filter.allowReceived(connection, object)) return;
     if (!(object instanceof Packet packet)) return;
-    delegateReceive(connection, packet);
+    receive(connection, packet);
   }
 
   @Override
   public void idle(Connection connection) {
-    if (!filter.idle(connection)) return;
-    delegateReceive(connection, Idle.instance);
-  }
-
-  /** Whether packet reception is delegated to the main thread or not. */
-  public boolean delegated() {
-    return delegator != null;
+    if (!filter.allowIdle(connection)) return;
+    receive(connection, Idle.instance);
   }
 
   public <T extends Packet> void handle(Class<T> type, Runnable listener) {
-    handle(type, (_, __) -> listener.run());
+    handle(type, (_, _) -> listener.run());
   }
 
   public <T extends Packet> void handle(Class<T> type, Cons<Connection> listener) {
@@ -115,22 +107,14 @@ public class ServerReceiver implements NetListener {
     return (Cons2<Connection, T>)listeners.get(type);
   }
 
-  /** Send packet reception to the main thread or not according to {@link #delegated}. */
-  public void delegateReceive(Connection connection, Packet packet) {
-    if (delegated()) delegator.get(() -> received(connection, packet));
-    else received(connection, packet);
-  }
-
   @SuppressWarnings("unchecked")
-  public void received(Connection connection, Packet packet) {
+  public void receive(Connection connection, Packet packet) {
     if (!packet.allow(true)) return; // Throw away unwanted packets
 
     try {
-      packet.handled();
-
       if (packet instanceof StreamPacket stream) {
         packet = StreamReceiver.received(connection, stream);
-        if (packet != null) received(connection, packet);
+        if (packet != null) receive(connection, packet);
         return;
       }
 

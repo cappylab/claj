@@ -23,19 +23,10 @@ import java.net.URLClassLoader;
 import java.util.Locale;
 
 import arc.ApplicationListener;
-import arc.files.Fi;
-import arc.files.ZipFi;
-import arc.func.Cons;
-import arc.func.Cons2;
-import arc.func.Prov;
+import arc.files.*;
+import arc.func.*;
 import arc.struct.*;
-import arc.util.CommandHandler;
-import arc.util.Log;
-import arc.util.Nullable;
-import arc.util.OS;
-import arc.util.Strings;
-import arc.util.Structs;
-import arc.util.Time;
+import arc.util.*;
 import arc.util.serialization.Json;
 import arc.util.serialization.Jval;
 
@@ -76,7 +67,7 @@ public class Plugins implements ApplicationListener {
     return pluginCache.get(plugin, CacheEntry::new).getConfig(() -> {
       Fi result = directory.child(getMeta(plugin).name);
       result.mkdirs();
-      return result;      
+      return result;
     });
   }
 
@@ -87,7 +78,7 @@ public class Plugins implements ApplicationListener {
 
   /** @return a settings handle of {@code 'plugins/<plugin-name>/config.json'}. Call this in init(). */
   public JsonSettings getConfig(Class<? extends Plugin> plugin) {
-    return pluginCache.get(plugin, CacheEntry::new).getSettings(() -> 
+    return pluginCache.get(plugin, CacheEntry::new).getSettings(() ->
       new JsonSettings(getConfigFolder(plugin).child("config.json")));
   }
 
@@ -281,7 +272,7 @@ public class Plugins implements ApplicationListener {
     }
 
     // Resolve the state
-    plugins.each(this::updateDependencies);      
+    plugins.each(this::updateDependencies);
     sortPlugins();
   }
 
@@ -432,8 +423,6 @@ public class Plugins implements ApplicationListener {
    * Note that directories can be loaded as plugins.
    */
   private LoadedPlugin loadPlugin(Fi sourceFile, boolean overwrite, boolean initialize) throws Exception {
-    Time.mark();
-
     Fi zip = sourceFile.isDirectory() ? sourceFile : new ZipFi(sourceFile);
     if (zip.list().length == 1 && zip.list()[0].isDirectory()) zip = zip.list()[0];
 
@@ -474,9 +463,9 @@ public class Plugins implements ApplicationListener {
 
     //make sure the main class exists before loading it; if it doesn't just don't put it there
     //if the plugin is explicitly marked as java, try loading it anyway
-    if (mainFile.exists() && 
-        ("0".equals(meta.minClajVersion) || ClajVars.version.isAtLeast(meta.minClajVersion)) && 
-        !ClajVars.skipPluginLoading && 
+    if (mainFile.exists() &&
+        ("0".equals(meta.minClajVersion) || ClajVars.version.isAtLeast(meta.minClajVersion)) &&
+        !ClajVars.skipPluginLoading &&
         initialize
     ) {
       loader = JarLoader.load(sourceFile, mainLoader);
@@ -496,13 +485,13 @@ public class Plugins implements ApplicationListener {
       metas.put(main, meta);
       loaders.put(loader, main);
       mainMod = (Plugin)main.getDeclaredConstructor().newInstance();
-      
+
     } else {
       if (!mainFile.exists()) {
-        Log.warn("The entry-point of plugin '@' was not found: @. Please check his 'main' property.", 
+        Log.warn("The entry-point of plugin '@' was not found: @. Please check his 'main' property.",
                  meta.name, meta.main);
       }
-      
+
       mainMod = null;
     }
 
@@ -512,7 +501,7 @@ public class Plugins implements ApplicationListener {
       if(line != -1) meta.version = meta.version.substring(0, line);
     }
 
-    Log.info("Loaded plugin '@' in @ms", meta.name, Time.elapsed());
+    Log.info("Loaded plugin '@'", meta.name);
     return new LoadedPlugin(sourceFile, zip, mainMod, loader, meta);
   }
 
@@ -561,7 +550,7 @@ public class Plugins implements ApplicationListener {
     public int getMinMajor(){
       return meta.getMinMajor();
     }
-        
+
     @Override
     public String toString() {
       return "LoadedPlugin{" +
@@ -651,34 +640,34 @@ public class Plugins implements ApplicationListener {
       this.required = required;
     }
   }
-  
+
   private static class CacheEntry {
     public JsonSettings settings;
     public Fi config;
     public PluginLogger logger;
     public ObjectMap<Class<?>, PluginLogger> classLoggers;
     public ObjectMap<String, PluginLogger> stringLoggers;
-    
+
     public JsonSettings getSettings(Prov<JsonSettings> prov) {
       if (settings == null) settings = prov.get();
       return settings;
     }
-    
+
     public Fi getConfig(Prov<Fi> prov) {
       if (config == null) config = prov.get();
       return config;
     }
-    
+
     public PluginLogger getLogger(Prov<PluginLogger> prov) {
       if (logger == null) logger = prov.get();
       return logger;
     }
-        
+
     public PluginLogger getLogger(Class<?> topic, Prov<PluginLogger> prov) {
       if (classLoggers == null) classLoggers = new ObjectMap<>(8);
       return classLoggers.get(topic, prov);
-    }  
-    
+    }
+
     public PluginLogger getLogger(String topic, Prov<PluginLogger> prov) {
       if (stringLoggers == null) stringLoggers = new ObjectMap<>(8);
       return stringLoggers.get(topic, prov);

@@ -36,36 +36,12 @@ import com.xpdustry.claj.server.util.NetworkSpeed;
 
 
 public class ClajServerSerializer implements NetSerializer, FrameworkSerializer {
-  public static boolean POOLED_BUFFERS = true;
-  /** This includes {@link ConnectionPayloadPacket} and {@link RawPacket}. */
-  public static boolean REUSE_RAW_PACKETS = true;
-
-
-  private static class MyRawPacket extends RawPacket {
-    static final MyRawPacket intance = new MyRawPacket();
-    {
-      autoFree = false;
-      data = ByteBuffer.allocate(0);
-    }
-    public MyRawPacket read(ByteBuffer buffer) {
-      if (data.capacity() != buffer.capacity()) data = ByteBuffer.allocate(buffer.capacity());
-      else data.clear();
-      data.put(buffer).flip();
-      return this;
-    }
-    @Override
-    public void free() {} // Ensure no free
-  }
-  private static final ConnectionPayloadPacket cppi = new ConnectionPayloadPacket();
-  private static final byte cpp = ClajNet.getId(ConnectionPayloadPacket.class);
-
-
   static {
     // Set wrapper serializer
     ConnectionPayloadPacket.serializer = new ConnectionPayloadPacket.Serializer() {
       @Override
       public void read(ConnectionPayloadPacket packet, ByteBufferInput read) {
-        packet.raw = REUSE_RAW_PACKETS ? MyRawPacket.intance.read(read.buffer) : new RawPacket(read, POOLED_BUFFERS);
+        packet.raw = raw.get().read(read.buffer);
       }
       @Override
       public void write(ConnectionPayloadPacket packet, ByteBufferOutput write) {
@@ -74,12 +50,13 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
     };
   }
 
+  protected static final ThreadLocal<ByteBufferInput> read = Threads.local(ByteBufferInput::new);
+  protected static final ThreadLocal<ByteBufferOutput> write = Threads.local(ByteBufferOutput::new);
+  protected static final ThreadLocal<RawPacket> raw = Threads.local(RawPacket::new);
 
-  protected final ThreadLocal<ByteBufferInput> read = Threads.local(ByteBufferInput::new);
-  protected final ThreadLocal<ByteBufferOutput> write = Threads.local(ByteBufferOutput::new);
   public NetworkSpeed networkSpeed, packetCounter;
 
-  ClajServerSerializer() {}
+  public ClajServerSerializer() {}
   public ClajServerSerializer(NetworkSpeed networkSpeed, NetworkSpeed packetCounter) {
     this.networkSpeed = networkSpeed;
     this.packetCounter = packetCounter;
@@ -87,7 +64,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
 
   @Override
   public Object read(ByteBuffer buffer) {
-    if (networkSpeed != null) networkSpeed.downloadMark(buffer.remaining() + getLengthLength());
+    if (networkSpeed != null) networkSpeed.downloadMark(buffer.remaining());
     if (packetCounter != null) packetCounter.downloadMark();
     return switch (buffer.get()) {
       case ClajNet.frameworkId -> readFramework(buffer);
@@ -106,8 +83,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   }
 
   public Packet readClaj(ByteBuffer buffer) {
-    byte id = buffer.get();
-    Packet packet = REUSE_RAW_PACKETS && id == cpp ? cppi : ClajNet.newPacket(id);
+    Packet packet = ClajNet.newLocalPacket(buffer.get(), true);
     if(!packet.allow(true)) throw new ArcNetException("Invalid packet type for endpoint: " + packet.getClass());
     ByteBufferInput in = read.get();
     in.buffer = buffer;
@@ -117,7 +93,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
 
   public RawPacket readRaw(ByteBuffer buffer) {
     buffer.position(buffer.position()-1);
-    return REUSE_RAW_PACKETS ? MyRawPacket.intance.read(buffer) : new RawPacket(buffer, POOLED_BUFFERS);
+    return raw.get().read(buffer);
   }
 
   @Override
@@ -130,7 +106,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
       case Packet packet -> writeClaj(buffer, packet);
       default -> throw new ArcNetException("Unknown packet type: " + object.getClass().getName());
     }
-    if (networkSpeed != null) networkSpeed.uploadMark(buffer.position() - lastPos + getLengthLength());
+    if (networkSpeed != null) networkSpeed.uploadMark(buffer.position() - lastPos);
     if (packetCounter != null) packetCounter.uploadMark();
   }
 

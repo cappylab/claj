@@ -25,14 +25,14 @@ import arc.util.io.ByteBufferInput;
 import arc.util.io.ByteBufferOutput;
 
 
-public class RoomStatePacket extends DelayedPacket {
+public class RoomStatePacket implements Packet {
   /** Maximum buffer size allowed for a state. Anything exceeding this limit will be truncated. */
   public static final int MAX_BUFF_SIZE = 8128;
 
   public ByteBuffer state;
 
   @Override
-  protected void readImpl(ByteBufferInput read) {
+  public void read(ByteBufferInput read) {
     int size = read.readChar();
     if (size == 0) {
       state = null;

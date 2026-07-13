@@ -81,7 +81,7 @@ public class ClajNet {
     return (T)packets.get(getIndex(id)).get();
   }
 
-  public static <T extends Packet> T newLocalPacket(byte id) { return newLocalPacket(id, true); }
+  public static <T extends Packet> T newLocalPacket(byte id) { return newLocalPacket(id, false); }
   /**
    * For use with read, if packets are processed on the same thread.
    * @see #newLocalPacket(Class, boolean)
@@ -95,7 +95,7 @@ public class ClajNet {
    * For use with send, as packets are serialized in-place.
    * <p>
    * The {@code fast} argument determines whether to use an implementation with a same thread use (MRU) fast path.
-   * Default is {@code true}. <br>
+   * Default is {@code false}. <br>
    * You would set it to {@code false} only if you think the packet is likely to be frequently used
    * by multiple threads. As the fast path is only faster when a single thread is requesting it intensively. <br>
    * The argument is only taken into account during the first call for a given packet.

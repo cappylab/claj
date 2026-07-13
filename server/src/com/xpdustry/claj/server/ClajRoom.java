@@ -234,22 +234,17 @@ public class ClajRoom implements NetListener {
    * Please note that this method is mainly called from network thread.
    */
   public void received(Connection connection, ConnectionPayloadPacket wrap) {
-    if (closed || !isHost(connection)) {
-      wrap.raw.free();
-      return;
-    }
+    if (closed || !isHost(connection)) return;
 
     // Broadcast send
     if (wrap.conID == CON_BROADCAST) {
       //TODO: send broadcast close error, when no clients are in this room, for next major version
-      wrap.raw.autoFree = false; // avoid freeing it at first send
       // Crappy but will avoid an NPE when a client is disconnecting
       Object[] cons = clients.items;
       for (int i=0, n=clients.size; i<n; i++) {
         if (cons[i] != null) ((ClajConnection)cons[i]).send(wrap.raw, wrap.isTCP);
       }
       transferredPackets.uploadMark();
-      wrap.raw.free();
       return;
     }
 
@@ -264,12 +259,10 @@ public class ClajRoom implements NetListener {
       sendDisconnect(host, wrap.conID, DcReason.error);
     }
 
-    wrap.raw.free(); // In case of
   }
 
   public void received(ClajConnection connection, ConnectionPayloadPacket wrap) {
     if (connection != null) received(connection.connection, wrap);
-    else wrap.raw.free();
   }
 
   /**
@@ -280,10 +273,7 @@ public class ClajRoom implements NetListener {
    */
   public void received(Connection connection, RawPacket raw) {
     if (closed || connection == null || !host.isConnected() || isHost(connection) ||
-        !containsClient(connection)) {
-      raw.free();
-      return;
-    }
+        !containsClient(connection)) return;
 
     sendPayload(host, connection.getID(), raw, true);
     transferredPackets.downloadMark();
@@ -291,7 +281,6 @@ public class ClajRoom implements NetListener {
 
   public void received(ClajConnection connection, RawPacket raw) {
     if (connection != null) received(connection.connection, raw);
-    else raw.free();
   }
 
   /** Notifies the host of an idle connection. */

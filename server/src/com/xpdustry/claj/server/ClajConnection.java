@@ -103,56 +103,38 @@ public class ClajConnection {
    */
   private volatile RawPacket[] waitingQueue;
   private static final int packetQueueSize = 2, packetSizeInQueue = 1 << 13;
-  private final Object queueLock = new Object();
 
   /** @return whether a slot was found or not. */
   public boolean addQueue(RawPacket packet) {
     if (packet.data().remaining() >= packetSizeInQueue) {
-      packet.free();
       clearQueue();
       close(DcReason.error);
       Log.warn("Connection @ kicked for sending too big packets in the queue.", sid);
       return false;
     }
 
-    synchronized (queueLock) {
-      if (waitingQueue == null) waitingQueue = new RawPacket[packetQueueSize];
-      for (int i=0; i<waitingQueue.length; i++) {
-        if (waitingQueue[i] != null) continue;
-        waitingQueue[i] = packet;
-        return true;
-      }
+    RawPacket[] queue = waitingQueue;
+    if (queue == null) queue = new RawPacket[packetQueueSize];
+    for (int i=0; i<queue.length; i++) {
+      if (queue[i] != null) continue;
+      queue[i] = packet.copy();
+      waitingQueue = queue;
+      return true;
     }
+    waitingQueue = queue;
     return false;
   }
 
   public void clearQueue() {
-    if (waitingQueue == null) return;
-
-    RawPacket[] queue;
-    synchronized (queueLock) {
-      if (waitingQueue == null) return;
-      queue = waitingQueue;
-      waitingQueue = null;
-    }
-
-    for (RawPacket element : queue) {
-      if (element != null) element.free();
-    }
+    waitingQueue = null;
   }
 
   /** @return whether the queue has been sent to the room host, or not,
    *          because no packet was queued or connection is not in a room. */
   public boolean handleQueue() {
-    if (waitingQueue == null || room == null) return false;
-
-    // Needed because handling can be done on network and main thread
-    RawPacket[] queue;
-    synchronized (queueLock) {
-      if (waitingQueue == null) return false;
-      queue = waitingQueue;
-      waitingQueue = null;
-    }
+    RawPacket[] queue = waitingQueue;
+    if (queue == null || room == null) return false;
+    waitingQueue = null;
 
     Log.debug("Sending queued packets of connection @ to room host.", sid);
     for (RawPacket element : queue) {
