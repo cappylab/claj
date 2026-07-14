@@ -48,7 +48,7 @@ public class RawPacket implements Packet {
 
   @Override
   public void write(ByteBufferOutput write) {
-    write(first, write);
+    write(data(), write);
   }
 
   public ByteBuffer flipIfNeeded(int capacity) {

@@ -28,7 +28,6 @@ import com.xpdustry.claj.common.ClajPackets.*;
 import com.xpdustry.claj.common.net.stream.StreamPacket;
 import com.xpdustry.claj.common.net.stream.StreamReceiver;
 import com.xpdustry.claj.common.packets.Packet;
-import com.xpdustry.claj.common.util.AddressUtil;
 
 
 /** A server listener that can delegate packet decoding and reception to the main app. */
@@ -50,6 +49,10 @@ public class ServerReceiver implements NetListener {
     this.filter = filter;
   }
 
+  public NetListenerFilter getFilter() {
+    return filter;
+  }
+
   public void setErrorHandler(Cons<Throwable> errorHandler) {
     if (errorHandler == null) throw new NullPointerException("errorHandler");
     this.errorHandler = errorHandler;
@@ -58,9 +61,7 @@ public class ServerReceiver implements NetListener {
   @Override
   public void connected(Connection connection) {
     if (!filter.allowConnected(connection)) return;
-    Connect packet = new Connect();
-    packet.address = AddressUtil.getString(connection);
-    receive(connection, packet);
+    receive(connection, Connect.instance);
   }
 
   @Override
@@ -99,6 +100,10 @@ public class ServerReceiver implements NetListener {
         current.get(c, p);
       };
     }
+    listeners.put(type, listener);
+  }
+
+  public <T extends Packet> void handleReplace(Class<T> type, Cons2<Connection, T> listener) {
     listeners.put(type, listener);
   }
 

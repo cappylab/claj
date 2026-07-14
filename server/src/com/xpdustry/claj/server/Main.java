@@ -41,7 +41,7 @@ public class Main implements ApplicationListener {
     ClajVars.initLogger();
     if (!loadEnv(args)) System.exit(1);
 
-    app = new ServerApplication(new Main(), t -> {
+    app = new ServerApplication(new Main(), 4, t -> {
       //TODO: crash handler
       Throwable disposeError = null, saveError = null;
       // Try to dispose properly

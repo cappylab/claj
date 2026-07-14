@@ -344,23 +344,31 @@ public class ClajRoom implements NetListener {
   public void close() {
     close(CloseReason.closed);
   }
-
   /**
    * Closes the room and disconnects the host and all clients. <br>
    * The room object cannot be used anymore after this.
    */
   public void close(CloseReason reason) {
+    close(reason, true);
+  }
+
+  protected void close(CloseReason reason, boolean notify) {
     if (closed) return;
     closed = true; // close before kicking connections, to avoid receiving events
     closedAt = Time.millis();
 
     // Notify the reason to the host
-    if (host.isConnected()) sendRoomClosed(host, reason);
+    if (notify && host.isConnected()) sendRoomClosed(host, reason);
     Events.fire(new RoomClosedEvent(this));
 
     removeRoom(host);
     host.close();
     disconnectAllClients(DcReason.closed, false);
+  }
+
+  /** Same as {@link #close()}, but doesn't notify closure to host. */
+  public void closeQuietly() {
+    close(null, false);
   }
 
   /** Sends a message to the host and clients. */

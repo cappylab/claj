@@ -41,14 +41,12 @@ public class ClajClientSerializer implements NetSerializer, FrameworkSerializer 
   @Override
   public Object read(ByteBuffer buffer) {
     if (!buffer.hasRemaining()) return null;
-    return switch (buffer.get()) {
+    byte id = buffer.get();
+    return switch (id) {
       case ClajNet.frameworkId -> readFramework(buffer);
       case ClajNet.oldId -> throw new ArcNetException("Received a packet from the old CLaJ protocol");
       case ClajNet.id -> readClaj(buffer);
-      default -> {
-        buffer.position(buffer.position()-1);
-        throw new ArcNetException("Unknown protocol type: " + buffer.get());
-      }
+      default -> throw new ArcNetException("Unknown protocol type: " + id);
     };
   }
 
@@ -66,13 +64,14 @@ public class ClajClientSerializer implements NetSerializer, FrameworkSerializer 
     switch (object) {
       case ByteBuffer buf -> buffer.put(buf);
       case FrameworkMessage framework -> writeFramework(buffer.put(ClajNet.frameworkId), framework);
-      case Packet packet -> writeClaj(buffer, packet);
+      case RawPacket raw -> buffer.put(raw.data());
+      case Packet packet -> writeClaj(buffer.put(ClajNet.id), packet);
       default -> throw new ArcNetException("Unknown packet type: " + object.getClass());
     }
   }
 
   public void writeClaj(ByteBuffer buffer, Packet packet) {
-    if (!(packet instanceof RawPacket)) buffer.put(ClajNet.id).put(ClajNet.getId(packet));
+    buffer.put(ClajNet.getId(packet));
     ByteBufferOutput out = write.get();
     out.buffer = buffer;
     packet.write(out);

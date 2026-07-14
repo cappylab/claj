@@ -55,6 +55,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   protected static final ThreadLocal<RawPacket> raw = Threads.local(RawPacket::new);
 
   public NetworkSpeed networkSpeed, packetCounter;
+  public boolean decodeClaj = true;
 
   public ClajServerSerializer() {}
   public ClajServerSerializer(NetworkSpeed networkSpeed, NetworkSpeed packetCounter) {
@@ -69,7 +70,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
     return switch (buffer.get()) {
       case ClajNet.frameworkId -> readFramework(buffer);
       case ClajNet.oldId -> readString(buffer);
-      case ClajNet.id -> readClaj(buffer);
+      case ClajNet.id -> decodeClaj ? readClaj(buffer) : readRaw(buffer);
       // Non-claj packets are saved as raw buffer, to avoid re-serialization
       default -> readRaw(buffer);
     };
@@ -102,8 +103,9 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
     switch (object) {
       case ByteBuffer buff -> buffer.put(buff);
       case FrameworkMessage framework -> writeFramework(buffer.put(ClajNet.frameworkId), framework);
-      case String str -> writeString(buffer, str);
-      case Packet packet -> writeClaj(buffer, packet);
+      case String str -> writeString(buffer.put(ClajNet.oldId), str);
+      case RawPacket raw -> buffer.put(raw.data());
+      case Packet packet -> writeClaj(buffer.put(ClajNet.id), packet);
       default -> throw new ArcNetException("Unknown packet type: " + object.getClass().getName());
     }
     if (networkSpeed != null) networkSpeed.uploadMark(buffer.position() - lastPos);
@@ -111,7 +113,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   }
 
   public void writeClaj(ByteBuffer buffer, Packet packet) {
-    if (!(packet instanceof RawPacket)) buffer.put(ClajNet.id).put(ClajNet.getId(packet));
+    buffer.put(ClajNet.getId(packet));
     ByteBufferOutput out = write.get();
     out.buffer = buffer;
     packet.write(out);
@@ -120,7 +122,6 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   public void writeString(ByteBuffer buffer, String str) {
     ByteBufferOutput out = write.get();
     out.buffer = buffer;
-    buffer.put(ClajNet.oldId);
     Strings.writeUTF(out, str);
   }
 }

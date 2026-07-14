@@ -52,7 +52,7 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
   /** Read/Write speed. */
   public final NetworkSpeed networkSpeed, packetCounter;
   /** Server packet receiver. */
-  protected final ServerReceiver receiver;
+  public final ServerReceiver receiver;
   /** Server routines that manages cache and cleaning things. */
   public final ClajRoutines routines;
   /** List of valid connections. DO NOT EDIT MANUALLY! */
@@ -101,12 +101,64 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
       Log.debug(Strings.getStackTrace(e));
     }
 
+    // Another packets optimization. Packets are reads on main thread
+    removeListener(receiver);
+    serializer.decodeClaj = false;
+    serializer.networkSpeed = serializer.packetCounter = null;
+    addListener(new NetListener() {
+      NetListenerFilter filter = receiver.getFilter();
+      @SuppressWarnings("hiding")
+      final NetSerializer serializer = new ClajServerSerializer(networkSpeed, packetCounter);
+
+      public NetListenerFilter getFilter() {
+        // Suppress receiver filter to only keep allowReceived()
+        NetListenerFilter f = receiver.getFilter();
+        if (f != filter) {
+          filter = f;
+          receiver.setFilter(new NetListenerFilter() {
+            public boolean allowReceived(Connection connection, Object object) {
+              return getFilter().allowReceived(connection, object);
+            }
+          });
+        }
+        return filter;
+      }
+
+      @Override
+      public void connected(Connection connection) {
+        if (!getFilter().allowConnected(connection)) return;
+        Core.app.post(ListenerEvent.ofConnected(connection, receiver));
+      }
+
+      @Override
+      public void disconnected(Connection connection, DcReason reason) {
+        if (!getFilter().allowDisconnected(connection, reason)) return;
+        Core.app.post(ListenerEvent.ofDisconnected(connection, receiver, reason));
+      }
+
+      @Override
+      public void received(Connection connection, Object object) {
+        // Do not filter now
+        ByteBuffer buffer;
+        if (object instanceof RawPacket raw) buffer = raw.data();
+        else if (object instanceof ByteBuffer buf) buffer = buf;
+        else return;
+        Core.app.post(ListenerEvent.ofReceived(connection, receiver, buffer, serializer));
+      }
+
+      @Override
+      public void idle(Connection connection) {
+        if (!getFilter().allowIdle(connection)) return;
+        Core.app.post(ListenerEvent.ofIdle(connection, receiver));
+      }
+    });
+
+
     setDiscoveryHandler((_, r) -> {
       if (versionBuff == null)
         versionBuff = ByteBuffer.allocate(5).put(ClajNet.id).putInt(ClajConfig.serverVersion);
       r.respond((ByteBuffer)versionBuff.rewind());
     });
-
 
     receiver.handle(Connect.class, c -> onConnect(toClajCon(c)));
     receiver.handle(Disconnect.class, (c, p) -> onDisconnect(toClajCon(c), p.reason));
@@ -137,10 +189,10 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
   // end region
   // region filtering
 
-  /** Will also prepare the connection if valid. */
+  /** Will also prepare the connection if valid. Called from network thread. */
   @Override
   public boolean allowConnected(Connection connection) {
-    if (connection == null) return false;
+    if (connection == null || toClajCon(connection) != null) return false;
     String id = AddressUtil.encodeId(connection);
     String ip = AddressUtil.getString(connection);
     connection.setName("Connection " + id); // fix id format in stacktraces
@@ -161,7 +213,7 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
     return true;
   }
 
-  /** Weird name =/. */
+  /** Weird name =/. Called from network thread. */
   @Override
   public boolean allowDisconnected(Connection connection, DcReason reason) {
     if (connection == null) return false;
@@ -189,7 +241,7 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
     return checkRateLimit(con);
   }
 
-  /** We don't need that for moment. Will be useful for back-pressure. */
+  /** We don't need that for moment. Will be useful for back-pressure. called from network thread. */
   @Override
   public boolean allowIdle(Connection connection) {
     return false;
@@ -694,6 +746,7 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
     return room;
   }
 
+  /** Will not notify closure to room host. */
   public void closeRoom(ClajRoom room) { closeRoom(room, null); }
   public void closeRoom(ClajRoom room, CloseReason reason) { closeRoom(room, reason, true); }
   protected void closeRoom(ClajRoom room, CloseReason reason, boolean removeFromTypes) {
@@ -721,7 +774,7 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
     if (removeFromTypes) routines.clearRoomCache(room, removeList);
     else routines.cancelRoomInfoTask(room);
 
-    if (reason == null) room.close();
+    if (reason == null) room.closeQuietly();
     else room.close(reason);
   }
 
@@ -867,7 +920,7 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
   }
 
   /**
-   * Simple packet spam protection. Note: called on network thread.
+   * Simple packet spam protection.
    * @return whether the packet is allowed or not. If not, the client will be kicked and the room warned.
    */
   public boolean checkRateLimit(ClajConnection con) {

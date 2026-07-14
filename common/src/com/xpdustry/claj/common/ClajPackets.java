@@ -59,7 +59,7 @@ public class ClajPackets {
 
   /** Generic client connection event. */
   public static class Connect implements Packet {
-    public String address;
+    public static final Connect instance = new Connect();
   }
 
   /** Generic client disconnection event. */

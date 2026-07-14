@@ -31,11 +31,9 @@ import mindustry.io.JsonIO;
 import mindustry.mod.Mod;
 import mindustry.mod.Mods;
 import mindustry.net.Net;
-import mindustry.net.NetConnection;
 import mindustry.net.Packets.KickReason;
 
 import com.xpdustry.claj.api.Claj;
-import com.xpdustry.claj.api.ClajProxy;
 
 
 public class Main extends Mod {
@@ -68,16 +66,13 @@ public class Main extends Mod {
   public void initEvents() {
     // Pretty difficult to know when the player quits the game,
     // there is no event and StateChangeEvent is not reliable for that...
-    Vars.ui.paused.hidden(() -> {
+    Runnable closeRooms = () -> {
       if (Vars.net.active() && !Vars.state.isMenu()) return;
-      Claj.get().closeRooms();
-    });
+      stopClaj();
+    };
+    Vars.ui.paused.hidden(closeRooms);
     Vars.ui.restart.hidden(() -> {
-      if (Vars.state.isCampaign()) return;
-      Time.run(7f, () -> {
-        if (Vars.net.active() && !Vars.state.isMenu()) return;
-        Claj.get().closeRooms();
-      });
+      if (!Vars.state.isCampaign()) Time.run(7f, closeRooms);
     });
 
     Events.run(EventType.HostEvent.class, this::stopClaj);
@@ -105,45 +100,7 @@ public class Main extends Mod {
 
   public void initBroadcastHook() {
     if (Vars.net.getClass() != Net.class) return; // Replaced by another mod or us
-    Net hook = new Net(MindustryClajProvider.mindustryProvider) {
-      @Override
-      public void send(Object object, boolean reliable) {
-        MindustryClajProxy proxy = getProxy();
-        if (proxy == null) super.send(object, reliable);
-        else broadcast(proxy, null, null, object, reliable);
-      }
-
-      // V8 specific. Use specific bulk send methods when dropping V7 support.
-      //@Override
-      public void send(Object object, Iterable<NetConnection> connections, boolean reliable){
-        MindustryClajProxy proxy = getProxy();
-        if (proxy == null) super.send(object, connections, reliable);
-        else broadcast(proxy, connections, null, object, reliable);
-      }
-
-      @Override
-      public void sendExcept(NetConnection except, Object object, boolean reliable) {
-        MindustryClajProxy proxy = getProxy();
-        // Cannot exclude a CLaJ connection from broadcast
-        if (proxy == null || proxy.getConnection(except) != null) super.sendExcept(except, object, reliable);
-        else broadcast(proxy, null, except, object, reliable);
-      }
-
-      public MindustryClajProxy getProxy() {
-        if (!server()) return null;
-        ClajProxy proxy = Claj.get().proxies.get();
-        return proxy.roomCreated() && proxy instanceof MindustryClajProxy mproxy ? mproxy : null;
-      }
-
-      public void broadcast(MindustryClajProxy proxy, Iterable<NetConnection> connections, NetConnection except,
-                            Object object, boolean reliable) {
-        for (NetConnection con : connections == null ? getConnections() : connections) {
-          if (con == except || proxy.getConnection(con) != null) continue;
-          con.send(object, reliable);
-        }
-        proxy.broadcast(object, reliable);
-      }
-    };
+    Net hook = new MindustryNet();
     JsonIO.json.copyFields(Vars.net, hook, true);
     Vars.net = hook;
   }
