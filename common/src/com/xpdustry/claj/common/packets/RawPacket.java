@@ -24,14 +24,15 @@ import java.nio.ByteBuffer;
 import arc.util.io.ByteBufferInput;
 import arc.util.io.ByteBufferOutput;
 
+import com.xpdustry.claj.common.util.ByteBufferPool;
+
 
 /**
  * Wrapper for {@link ByteBuffer} that implements {@link Packet}. <br>
  * This is only needed due to compatibility with receivers.
  */
 public class RawPacket implements Packet {
-  private static final ByteBuffer EMPTY = ByteBuffer.allocate(0);
-  protected ByteBuffer first = EMPTY, second = EMPTY;
+  protected ByteBuffer first = ByteBufferPool.getHeap(0), second = ByteBufferPool.getHeap(0);
   protected boolean flipped;
 
   public RawPacket read(ByteBuffer buffer) {
@@ -57,7 +58,8 @@ public class RawPacket implements Packet {
     flipped ^= true;
     buf = data();
     if (buf.capacity() == capacity) return buf;
-    buf = ByteBuffer.allocate(capacity);
+    ByteBufferPool.free(buf);
+    buf = ByteBufferPool.getHeap(capacity);
     if (flipped) second = buf;
     else first = buf;
     return buf;

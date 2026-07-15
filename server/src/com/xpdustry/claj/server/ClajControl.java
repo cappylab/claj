@@ -120,7 +120,9 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
       Log.info("CLaJ Node Status:");
       Log.info("&lk|&fr Version: CLaJ @ (@), Java @", state.version, state.majorVersion, state.javaVersion);
       Log.info("&lk|&fr Uptime: @", Strings.formatDuration(state.uptime, true));
-      Log.info("&lk|&fr Main TPS: @", state.mainTps);
+      boolean sa = Core.app instanceof ServerApplication;
+      Log.info("&lk|&fr Main TPS: @" + (sa ? " (@ awaiting)" : ""), state.mainTps,
+               sa ? ((ServerApplication)Core.app).waitingTasks() : -1);
       Log.info("&lk|&fr Net TPS: @", state.netTps);
       Log.info("&lk|&fr Heap: @ / @ (@)", Strings.formatBytes(state.usedHeap), Strings.formatBytes(state.allocatedHeap),
                Strings.formatBytes(state.maxHeap));

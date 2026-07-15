@@ -17,24 +17,28 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package com.xpdustry.claj.common.net;
+package com.xpdustry.claj.server.util;
 
 import java.nio.ByteBuffer;
 
 import arc.net.*;
-import arc.util.pooling.*;
+
+import com.xpdustry.claj.common.util.ByteBufferPool;
+import com.xpdustry.claj.common.util.Pool;
 
 
 /** Poolable class to delay packet decoding and event running to another thread. */
-public class ListenerEvent implements Runnable, Pool.Poolable {
-  protected static final Pool<ListenerEvent> pool = Pools.get(ListenerEvent.class, ListenerEvent::new, 4096);
-  protected static final ByteBuffer empty = ByteBuffer.allocate(0);
+public class NetListenerEvent implements Runnable, Pool.Poolable {
+  //TODO: make an adaptative pool
+  /** Having a big pool can help at high load */
+  protected static final Pool<NetListenerEvent> pool = new Pool<>(8128, NetListenerEvent::new);
+  static { pool.fill(); }
 
   /** -1: invalid, 0: connected, 1: disconnected, 2: received raw, 3: received, 4: idle. */
   protected byte type;
   protected Connection connection;
   protected DcReason reason;
-  protected ByteBuffer buffer = empty;
+  protected ByteBuffer buffer = ByteBufferPool.getHeap(0);
   protected Object object;
   protected NetListener listener;
   protected NetSerializer serializer;
@@ -53,9 +57,7 @@ public class ListenerEvent implements Runnable, Pool.Poolable {
         default -> throw new RuntimeException("Invalid event type: " + type);
       }
     } finally {
-      synchronized (pool) {
-        pool.free(this);
-      }
+      if (!pool.offer(this)) ByteBufferPool.free(buffer);
     }
   }
 
@@ -71,19 +73,20 @@ public class ListenerEvent implements Runnable, Pool.Poolable {
     serializer = null;
   }
 
-  protected static ListenerEvent get(int type, Connection connection, DcReason reason, ByteBuffer buffer,
-                                     Object object, NetListener listener, NetSerializer serializer) {
-    ListenerEvent o;
-    synchronized (pool) {
-      o = pool.obtain();
-    }
+  protected static NetListenerEvent get(int type, Connection connection, DcReason reason, ByteBuffer buffer,
+                                        Object object, NetListener listener, NetSerializer serializer) {
+    NetListenerEvent o = pool.obtain();
     o.reset = false;
     o.type = (byte)type;
     o.connection = connection;
     o.reason = reason;
     if (buffer != null) {
-      if (buffer.capacity() <= o.buffer.capacity()) o.buffer.clear();
-      else o.buffer = ByteBuffer.allocate(buffer.capacity());
+      int len = buffer.remaining();
+      if (len > o.buffer.capacity()) {
+        ByteBuffer b = o.buffer;
+        o.buffer = ByteBufferPool.getHeap(len);
+        ByteBufferPool.free(b);
+      } else o.buffer.clear();
       o.buffer.put(buffer).flip();
     }
     o.object = object;
@@ -92,24 +95,24 @@ public class ListenerEvent implements Runnable, Pool.Poolable {
     return o;
   }
 
-  public static ListenerEvent ofConnected(Connection connection, NetListener listener) {
+  public static NetListenerEvent ofConnected(Connection connection, NetListener listener) {
     return get(0, connection, null, null, null, listener, null);
   }
 
-  public static ListenerEvent ofDisconnected(Connection connection, NetListener listener, DcReason reason) {
+  public static NetListenerEvent ofDisconnected(Connection connection, NetListener listener, DcReason reason) {
     return get(1, connection, reason, null, null, listener, null);
   }
 
-  public static ListenerEvent ofReceived(Connection connection, NetListener listener, ByteBuffer buffer,
-                                         NetSerializer serializer) {
+  public static NetListenerEvent ofReceived(Connection connection, NetListener listener, ByteBuffer buffer,
+                                            NetSerializer serializer) {
     return get(2, connection, null, buffer, null, listener, serializer);
   }
 
-  public static ListenerEvent ofReceived(Connection connection, NetListener listener, Object object) {
+  public static NetListenerEvent ofReceived(Connection connection, NetListener listener, Object object) {
     return get(3, connection, null, null, object, listener, null);
   }
 
-  public static ListenerEvent ofIdle(Connection connection, NetListener listener) {
+  public static NetListenerEvent ofIdle(Connection connection, NetListener listener) {
     return get(4, connection, null, null, null, listener, null);
   }
 }

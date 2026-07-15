@@ -23,7 +23,8 @@ import arc.*;
 import arc.func.Cons;
 import arc.mock.*;
 import arc.struct.Seq;
-import arc.util.TaskQueue;
+
+import com.xpdustry.claj.server.util.TaskQueue;
 
 
 public class ServerApplication implements Application {
@@ -54,14 +55,18 @@ public class ServerApplication implements Application {
     listeners.each(ApplicationListener::init);
 
     while (running) {
-      synchronized (runnables) {
-        try { runnables.wait(timeout); }
-        catch (InterruptedException e) { break; }
-        runnables.run();
+      if (runnables.size() == 0) {
+        synchronized (runnables) {
+          if (runnables.size() == 0) { // Be sure
+            try { runnables.wait(timeout); }
+            catch (InterruptedException e) { break; }
+          }
+        }
       }
+      runnables.run();
       graphics.incrementFrameId();
-      defaultUpdate();
-      listeners.each(ApplicationListener::update);
+      //defaultUpdate();
+      //listeners.each(ApplicationListener::update); // This can be too much overhead at high load
       graphics.updateTime();
     }
 
@@ -99,8 +104,10 @@ public class ServerApplication implements Application {
 
   @Override
   public void post(Runnable runnable) {
+    boolean wasEmpty = runnables.size() == 0;
+    runnables.post(runnable);
+    if (!wasEmpty) return;
     synchronized (runnables) {
-      runnables.post(runnable);
       runnables.notify();
     }
   }
@@ -108,5 +115,10 @@ public class ServerApplication implements Application {
   @Override
   public void exit() {
     post(() -> running = false);
+  }
+
+  /** @return an estimate number of task awaiting to be run. Used for monitoring. */
+  public int waitingTasks() {
+    return runnables.size();
   }
 }

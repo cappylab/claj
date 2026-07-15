@@ -54,6 +54,14 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   protected static final ThreadLocal<ByteBufferOutput> write = Threads.local(ByteBufferOutput::new);
   protected static final ThreadLocal<RawPacket> raw = Threads.local(RawPacket::new);
 
+  /**
+   * As there is only one serializer for CLaJ servers, the fast path can be used.
+   * <p>
+   * Remember to disable it, if using the serializer elsewhere.
+   * Indeed, the fast path is only efficient if a single thread uses it frequently.
+    */
+  public static boolean FAST_THREAD_LOCAL = true;
+
   public NetworkSpeed networkSpeed, packetCounter;
   public boolean decodeClaj = true;
 
@@ -84,7 +92,7 @@ public class ClajServerSerializer implements NetSerializer, FrameworkSerializer 
   }
 
   public Packet readClaj(ByteBuffer buffer) {
-    Packet packet = ClajNet.newLocalPacket(buffer.get(), true);
+    Packet packet = ClajNet.newLocalPacket(buffer.get(), FAST_THREAD_LOCAL);
     if(!packet.allow(true)) throw new ArcNetException("Invalid packet type for endpoint: " + packet.getClass());
     ByteBufferInput in = read.get();
     in.buffer = buffer;
