@@ -353,7 +353,7 @@ public class ClajConfig {
       And the other handling packet decoding, business logic, and serialization.
       This increases speed and processing capacity, at the cost of double or triple of the RAM
       and slightly higher CPU usage. This can be helpful for heavy load servers.
-      &fiWARNING: this is currently in development, setting this to false can break things.&fr
+      &fiWARNING: this is currently experimental, setting this to false can break things.&fr
       """.trim()
   ).reverse();
 
