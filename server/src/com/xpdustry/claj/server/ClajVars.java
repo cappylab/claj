@@ -19,15 +19,16 @@
 
 package com.xpdustry.claj.server;
 
+import java.nio.BufferOverflowException;
+import java.nio.BufferUnderflowException;
+import java.nio.channels.ClosedChannelException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 import arc.Files.FileType;
 import arc.files.Fi;
 import arc.net.ArcNet;
-import arc.util.ColorCodes;
-import arc.util.Log;
-import arc.util.Strings;
+import arc.util.*;
 
 import com.xpdustry.claj.common.status.ClajVersion;
 import com.xpdustry.claj.server.plugin.Plugins;
@@ -57,10 +58,18 @@ public class ClajVars {
   public static void initLogger() {
     ArcNet.errorHandler = e -> {
       // Ignore connection reset, closed and broken errors
-      String m = Strings.getFinalMessage(e);
+      Throwable cause = Strings.getFinalCause(e);
+      String m = cause.getMessage();
       if (m != null) {
         m = m.toLowerCase();
         if (m.contains("reset") || m.contains("closed") || m.contains("broken pipe")) return;
+      }
+      // Ignore closed channel errors
+      if (cause instanceof ClosedChannelException) return;
+      // Summarize buffer over/underflow errors
+      if (cause instanceof BufferOverflowException || cause instanceof BufferUnderflowException) {
+        Log.err(e.toString() + ": " + cause.toString());
+        return;
       }
 
       Log.err(e);

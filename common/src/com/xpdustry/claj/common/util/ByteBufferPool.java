@@ -70,10 +70,6 @@ public final class ByteBufferPool {
     return direct ? directs : heaps;
   }
 
-  protected int toFactor(int bucket) {
-    return bucket * factor;
-  }
-
   protected ByteBuffer newBuffer(boolean direct, int capacity) {
     return direct ? ByteBuffer.allocateDirect(capacity).order(ByteOrder.nativeOrder()) : ByteBuffer.allocate(capacity);
   }
@@ -93,14 +89,14 @@ public final class ByteBufferPool {
    */
   public ByteBuffer obtain(int size, boolean direct) {
     if (size <= 0) return direct ? EMPTY_DIRECT : EMPTY_HEAP;
-    int bucketSize = toFactor(bucketOf(size));
-    Pool<ByteBuffer> bucket = getBuckets(direct).get(bucketSize);
+    int bucket = bucketOf(size);
+    Pool<ByteBuffer> pool = getBuckets(direct).get(bucket);
     ByteBuffer buf = null;
-    if (bucket != null) {
-      buf = bucket.poll();
+    if (pool != null) {
+      buf = pool.poll();
       if (buf != null) buf = (ByteBuffer)buf.clear();
     }
-    if (buf == null) buf = newBuffer(direct, bucketSize);
+    if (buf == null) buf = newBuffer(direct, bucket * factor);
     return (ByteBuffer)buf.limit(size);
   }
 
@@ -111,8 +107,10 @@ public final class ByteBufferPool {
    *         not at the defined {@link #factor}, or simply because the associated bucket is full.
    */
   public boolean release(ByteBuffer buf) {
-    if (buf == null || buf.capacity() <= 0 || buf.capacity() % factor != 0) return false;
-    return getBuckets(buf.isDirect()).computeIfAbsent(buf.capacity(), newBucket).offer(buf);
+    if (buf == null) return false;
+    int capaticy = buf.capacity();
+    if (capaticy <= 0 || capaticy % factor != 0) return false;
+    return getBuckets(buf.isDirect()).computeIfAbsent(capaticy / factor, newBucket).offer(buf);
   }
 
   /** Fill a {@code bucket} completely. */
@@ -127,10 +125,10 @@ public final class ByteBufferPool {
   /** Fill a {@code bucket} with {@code size} new buffers. */
   public void fill(int bucket, int size, boolean direct) {
     if (size <= 0 || bucket <= 0) return;
-    int bucketSize = toFactor(bucket);
-    Pool<ByteBuffer> b = getBuckets(direct).computeIfAbsent(bucketSize, newBucket);
+    int capacity = bucket * factor;
+    Pool<ByteBuffer> b = getBuckets(direct).computeIfAbsent(bucket, newBucket);
     for (int i=0; i<size; i++) {
-      if (!b.offer(newBuffer(direct, bucketSize))) return;
+      if (!b.offer(newBuffer(direct, capacity))) return;
     }
   }
 
@@ -152,7 +150,7 @@ public final class ByteBufferPool {
    *          or {@code -1} if no pool has been created for this bucket. */
   public int size(int bucket, boolean direct) {
     if (bucket <= 0) return -1;
-    Pool<ByteBuffer> b = getBuckets(direct).get(toFactor(bucket));
+    Pool<ByteBuffer> b = getBuckets(direct).get(bucket);
     return b == null ? -1 : b.getFree();
   }
 
@@ -162,6 +160,6 @@ public final class ByteBufferPool {
 
   /** @return whether a pool has been created for the specified {@code bucket}. */
   public boolean has(int bucket, boolean direct) {
-    return bucket > 0 && getBuckets(direct).containsKey(toFactor(bucket));
+    return bucket > 0 && getBuckets(direct).containsKey(bucket);
   }
 }

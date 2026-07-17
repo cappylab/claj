@@ -45,7 +45,7 @@ public class ClajStateSummary {
   public final long uptime;
   public final int mainTps, netTps;
   public final long usedHeap, allocatedHeap, maxHeap;
-  public final long usedRam, commitedRam, maxRam;
+  public final long usedMeta, allocatedMeta, maxMeta;
   /** in %. {@code -1} if unknown. */
   public final float javaCpuLoad, systemCpuLoad;
   public final int rooms, clients, connections;
@@ -67,9 +67,9 @@ public class ClajStateSummary {
     allocatedHeap = usage.getCommitted();
     maxHeap = usage.getMax();
     usage = mem.getNonHeapMemoryUsage();
-    usedRam = usage.getUsed();
-    commitedRam = usage.getCommitted();
-    maxRam = usage.getMax();
+    usedMeta = usage.getUsed();
+    allocatedMeta = usage.getCommitted();
+    maxMeta = usage.getMax();
     javaCpuLoad = (float)(cpu.getProcessCpuLoad()*100);
     systemCpuLoad = (float)(cpu.getSystemCpuLoad()*100);
 

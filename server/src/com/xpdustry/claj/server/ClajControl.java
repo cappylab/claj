@@ -126,8 +126,8 @@ public class ClajControl extends CommandHandler implements ApplicationListener {
       Log.info("&lk|&fr Net TPS: @", state.netTps);
       Log.info("&lk|&fr Heap: @ / @ (@)", Strings.formatBytes(state.usedHeap), Strings.formatBytes(state.allocatedHeap),
                Strings.formatBytes(state.maxHeap));
-      Log.info("&lk|&fr Non-Heap: @ / @ (@)", Strings.formatBytes(state.usedRam), Strings.formatBytes(state.commitedRam),
-               Strings.formatBytes(state.maxRam));
+      Log.info("&lk|&fr Metaspace: @ / @ (@)", Strings.formatBytes(state.usedMeta), Strings.formatBytes(state.allocatedMeta),
+               Strings.formatBytes(state.maxMeta));
       Log.info("&lk|&fr CPU: @ (@)", String.format("%.2f%%", state.javaCpuLoad),
                String.format("%.2f%%", state.systemCpuLoad));
       Log.info("&lk|&fr Load: @ rooms, @ clients, @ connections.", state.rooms, state.clients, state.connections);

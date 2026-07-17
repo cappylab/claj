@@ -346,6 +346,14 @@ public class ClajConfig {
       Here, AFK means that no CLaJ clients has joined the room for a long time.
       Even if, in reality, there are connected clients, but with another way than CLaJ.
       Set to &lb0&lw to disable.
+      """.trim(),
+      """
+      Whether to divide work to two threads. (needs a restart to take effect)
+      One handling connections and sockets reads/writes.
+      And the other handling packet decoding, business logic, and serialization.
+      This increases speed and processing capacity, at the cost of double or triple of the RAM
+      and slightly higher CPU usage. This can be helpful for heavy load servers.
+      &fiWARNING: this is currently in development, setting this to false can break things.&fr
       """.trim()
   ).reverse();
 
@@ -376,6 +384,7 @@ public class ClajConfig {
   public static Field<Integer> listTimeout = new Field<>("list-timeout", fieldDescs.pop(), 30);
   public static Field<Integer> raterLifetime = new Field<>("rater-tifetime", fieldDescs.pop(), 5 * 60);
   public static Field<Integer> afkTime = new Field<>("afk-time", fieldDescs.pop(), 2 * 60);
+  public static Field<Boolean> dualThread = new Field<>("dual-thread", fieldDescs.pop(), true);
 
   // Other fields having their own command
   public static SetField<String> blacklist = new SetField<>("blacklist", "", String.class, ObjectSet::new);

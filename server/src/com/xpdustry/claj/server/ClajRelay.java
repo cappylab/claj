@@ -103,59 +103,64 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
     }
 
     // Another packets optimization. Packets are reads on main thread
-    removeListener(receiver);
-    serializer.decodeClaj = false;
-    addListener(new NetListener() {
-      NetListenerFilter filter, modified;
-      @SuppressWarnings("hiding")
-      final NetSerializer serializer = new ClajServerSerializer();
+    if (ClajConfig.dualThread.get()) {
+      removeListener(receiver);
+      serializer.decodeClaj = false;
+      addListener(new NetListener() {
+        NetListenerFilter filter, modified;
+        @SuppressWarnings("hiding")
+        final NetSerializer serializer = new ClajServerSerializer();
 
-      public NetListenerFilter getFilter() {
-        // Suppress receiver filter to only keep allowReceived()
-        NetListenerFilter f = receiver.getFilter();
-        if (f != filter && f != modified) {
-          filter = f;
-          receiver.setFilter(modified = new NetListenerFilter() {
-            public boolean allowReceived(Connection connection, Object object) {
-              return f.allowReceived(connection, object);
-            }
-          });
+        public NetListenerFilter getFilter() {
+          // Suppress receiver filter to only keep allowReceived()
+          NetListenerFilter f = receiver.getFilter();
+          if (f != filter && f != modified) {
+            filter = f;
+            receiver.setFilter(modified = new NetListenerFilter() {
+              public boolean allowReceived(Connection connection, Object object) {
+                return f.allowReceived(connection, object);
+              }
+            });
+          }
+          return filter;
         }
-        return filter;
-      }
 
-      @Override
-      public void connected(Connection connection) {
-        if (!getFilter().allowConnected(connection)) return;
-        Core.app.post(NetListenerEvent.ofConnected(connection, receiver));
-      }
-
-      @Override
-      public void disconnected(Connection connection, DcReason reason) {
-        if (!getFilter().allowDisconnected(connection, reason)) return;
-        Core.app.post(NetListenerEvent.ofDisconnected(connection, receiver, reason));
-      }
-
-      @Override
-      public void received(Connection connection, Object object) {
-        // Do not filter now
-        ByteBuffer buffer;
-        if (object instanceof RawPacket raw) buffer = raw.data();
-        else if (object instanceof ByteBuffer buf) buffer = buf;
-        else if (object instanceof FrameworkMessage) return; // We don't care of framework messages
-        else {
-          Core.app.post(NetListenerEvent.ofReceived(connection, receiver, object));
-          return;
+        @Override
+        public void connected(Connection connection) {
+          if (!getFilter().allowConnected(connection)) return;
+          Core.app.post(NetListenerEvent.ofConnected(connection, receiver));
         }
-        Core.app.post(NetListenerEvent.ofReceived(connection, receiver, buffer, serializer));
-      }
 
-      @Override
-      public void idle(Connection connection) {
-        if (!getFilter().allowIdle(connection)) return;
-        Core.app.post(NetListenerEvent.ofIdle(connection, receiver));
-      }
-    });
+        @Override
+        public void disconnected(Connection connection, DcReason reason) {
+          if (!getFilter().allowDisconnected(connection, reason)) return;
+          Core.app.post(NetListenerEvent.ofDisconnected(connection, receiver, reason));
+        }
+
+        @Override
+        public void received(Connection connection, Object object) {
+          // Do not filter now
+          ByteBuffer buffer;
+          if (object instanceof RawPacket raw) buffer = raw.data();
+          else if (object instanceof ByteBuffer buf) buffer = buf;
+          else if (object instanceof FrameworkMessage) return; // We don't care of framework messages
+          else {
+            Core.app.post(NetListenerEvent.ofReceived(connection, receiver, object));
+            return;
+          }
+          Core.app.post(NetListenerEvent.ofReceived(connection, receiver, buffer, serializer));
+        }
+
+        @Override
+        public void idle(Connection connection) {
+          if (!getFilter().allowIdle(connection)) return;
+          Core.app.post(NetListenerEvent.ofIdle(connection, receiver));
+        }
+      });
+
+    } else {
+      //TODO: redirect Core.app.post() calls here
+    }
 
 
     setDiscoveryHandler((_, r) -> {
