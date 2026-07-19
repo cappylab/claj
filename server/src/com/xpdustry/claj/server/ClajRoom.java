@@ -524,7 +524,7 @@ public class ClajRoom implements NetListener {
   /** Packet ids for optimization. */
   private static final byte
       cjp = ClajNet.getId(ConnectionJoinPacket.class),    rap = ClajNet.getId(RoomJoinAcceptedPacket.class),
-      rdp = ClajNet.getId(ConnectionClosedPacket.class),  ccp = ClajNet.getId(ConnectionClosedPacket.class),
+      rdp = ClajNet.getId(RoomJoinDeniedPacket.class),    ccp = ClajNet.getId(ConnectionClosedPacket.class),
       cpp = ClajNet.getId(ConnectionPayloadPacket.class), cip = ClajNet.getId(ConnectionIdlingPacket.class),
       rlp = ClajNet.getId(RoomLinkPacket.class),          rcp = ClajNet.getId(RoomClosedPacket.class),
       ctp = ClajNet.getId(ClajTextMessagePacket.class),   cmp = ClajNet.getId(ClajMessagePacket.class),

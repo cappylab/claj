@@ -23,17 +23,20 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.ExecutorService;
 
 import arc.Core;
-import arc.net.NetListener;
-import arc.net.Server;
+import arc.func.Cons;
+import arc.net.*;
+import arc.struct.ObjectMap;
 import arc.util.*;
 import arc.util.io.ByteBufferInput;
 import arc.util.io.ByteBufferOutput;
 
 import mindustry.Vars;
 import mindustry.gen.Call;
+import mindustry.net.ArcNetProvider;
 import mindustry.net.ArcNetProvider.PacketSerializer;
 import mindustry.net.Net.NetProvider;
 import mindustry.net.NetworkIO;
+import mindustry.net.Packets.Connect;
 
 import com.xpdustry.claj.api.*;
 import com.xpdustry.claj.common.packets.ConnectionPayloadPacket;
@@ -41,7 +44,8 @@ import com.xpdustry.claj.common.status.*;
 
 
 public class MindustryClajProvider implements ClajProvider {
-  public static final NetProvider mindustryProvider;
+  public static final ArcNetProvider mindustryProvider;
+  public static final Client mindustryClient;
   public static final Server mindustryServer;
   public static final NetListener mindustryServerDispatcher;
   public static final PacketSerializer mindustrySerializer;
@@ -50,15 +54,36 @@ public class MindustryClajProvider implements ClajProvider {
   /** CLaJ type is {@code "Mindustry"} for this implementation. */
   public static final ClajType implType;
 
+  private static ByteBuffer magicPacket;
+
   static {
-    NetProvider provider = Reflect.get(Vars.net, "provider");
-    if (Vars.steam) provider = Reflect.get(provider, "provider");
-    mindustryProvider = provider;
-    mindustryServer = Reflect.get(mindustryProvider, "server");
-    mindustryServerDispatcher = Reflect.get(mindustryServer, "dispatchListener");
+    try {
+      NetProvider provider = Reflect.get(Vars.net, "provider");
+      // Loop over all providers in case of a mod already hooking it
+      while (!(provider instanceof ArcNetProvider anp)) {
+        provider = Reflect.get(provider, "provider");
+      }
+      mindustryProvider = anp;
+    } catch (Exception e) { throw new RuntimeException("Unable to find the ArcNetProvider", e); }
+    mindustryClient = Reflect.get(mindustryProvider, "client");
+    mindustryServer = Reflect.get(mindustryProvider, "server"); // Safe, we already know that is ArcNetProvider
+    mindustryServerDispatcher = Reflect.get(mindustryServer, "dispatchListener"); // Safe, never changed
     mindustrySerializer = new PacketSerializer();
     clajVersion = ClajVersion.of(Main.getMeta().version);
     implType = ClajType.of("Mindustry");
+
+    // Hook Connect listener, so that magic join packet is send before ConnectPacket
+    // We really need a method to get a listener...
+    @SuppressWarnings("unchecked")
+    Cons<Connect> connect = (Cons<Connect>)Reflect.<ObjectMap<Class<?>, Cons<?>>>get(Vars.net, "clientListeners")
+                                                  .get(Connect.class);
+    if (connect != null) {
+      Vars.net.handleClient(Connect.class, p -> {
+        if (magicPacket != null) Vars.net.send(magicPacket, true);
+        magicPacket = null;
+        connect.get(p);
+      });
+    }
   }
 
   @Override
@@ -122,12 +147,13 @@ public class MindustryClajProvider implements ClajProvider {
     Vars.logic.reset();
     Vars.net.reset();
     Vars.netClient.beginConnecting();
-    Vars.net.connect(host, port, () -> {
+    magicPacket = joinPacket;
+    Vars.net.connect(host, port, () -> Core.app.post(() -> {
       if (!Vars.net.client()) return;
       if (success != null) success.run();
-      //TODO: Override Connect listener to send it before ConnectPacket?
-      if (joinPacket != null) Vars.net.send(joinPacket, true);
-    });
+      if (magicPacket != null) Vars.net.send(magicPacket, true); // In case of
+      magicPacket = null;
+    }));
   }
 
   @Override

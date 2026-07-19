@@ -46,6 +46,7 @@ public class ClajStateSummary {
   public final int mainTps, netTps;
   public final long usedHeap, allocatedHeap, maxHeap;
   public final long usedMeta, allocatedMeta, maxMeta;
+  //TODO: add buffers summary?
   /** in %. {@code -1} if unknown. */
   public final float javaCpuLoad, systemCpuLoad;
   public final int rooms, clients, connections;

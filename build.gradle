@@ -20,7 +20,6 @@ subprojects {
   sourceSets.main.java.srcDirs = ["src"]
   sourceSets.main.resources.srcDirs = ["resources"]
   toxopid.compileVersion = "v${metadata.minGameVersion}"
-  ext.compileVersionV8 = "158"
   ext.arcNet = "com.github.Anuken.Arc:arcnet:${toxopid.compileVersion}" //toxopid.dependencies.arcnet
 
   repositories {
@@ -78,6 +77,7 @@ project(":api") {
 
 project(":client") {
   toxopid.platforms = [ModPlatform.DESKTOP, ModPlatform.ANDROID]
+  compileJava.options.release = 17 // Mindustry is now using Java 17
 
   dependencies {
     implementation project(":common")
@@ -108,15 +108,12 @@ project(":client") {
 
   // For testing
   runMindustryDesktop.mods.from mergeJar
-  task run(dependsOn: runMindustryDesktop) {
-    toxopid.compileVersion = "v${project.compileVersionV8}"
-  }
+  task run(dependsOn: runMindustryDesktop) {}
 }
 
 project(":server") {
   ext.mainClassName = "com.xpdustry.claj.server.Main"
   toxopid.platforms = [ModPlatform.SERVER]
-  toxopid.compileVersion = "v${project.compileVersionV8}"
 
   dependencies {
     implementation project(":common")
@@ -181,11 +178,7 @@ subprojects {
       from components.java
       artifact sourcesJar
       artifact javadocJar
-
-      // To simplify modding, we also publish a version with all dependencies
-      if (project.name == "server") {
-        artifact(release) { classifier = "all" }
-      }
+      artifact(release) { classifier = "all" }
 
       pom {
         organization {

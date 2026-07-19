@@ -44,7 +44,7 @@ public class ByteArrayBufferOutput extends ByteBufferOutput implements Closeable
   public ByteArrayBufferOutput(int initialCapacity, boolean compress) {
     back = new ReusableByteOutStream(initialCapacity);
     stream = new DataOutputStream(compress ? new FastDeflaterOutputStream(back) : back);
-    buffer = ByteBuffer.wrap(back.getBytes()).asReadOnlyBuffer();
+    buffer = ByteBuffer.wrap(back.getBytes());
     compressed = compress;
   }
 
@@ -162,7 +162,7 @@ public class ByteArrayBufferOutput extends ByteBufferOutput implements Closeable
 
   /** Will update the backed {@link ByteBuffer} if needed. */
   public void updateBuffer() {
-    if (back.getBytes() != buffer.array()) buffer = ByteBuffer.wrap(back.getBytes()).asReadOnlyBuffer();
+    if (back.getBytes() != buffer.array()) buffer = ByteBuffer.wrap(back.getBytes());
     buffer.position(back.size());
   }
 }

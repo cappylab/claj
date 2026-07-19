@@ -899,7 +899,7 @@ public class ClajRelay extends Server implements ApplicationListener, NetListene
 
   public boolean refreshRoomList(ClajType type) { return refreshRoomList(type, false); }
   public boolean refreshRoomList(ClajType type, boolean force) {
-    return routines.refreshRoomList(type, force, types.getNull(type));
+    return routines.refreshRoomList(type, force, types.get(type, (LongMap<ClajRoom>)null));
   }
 
   public void refreshRoomLists() {

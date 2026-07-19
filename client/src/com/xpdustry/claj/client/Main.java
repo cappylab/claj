@@ -22,23 +22,23 @@ package com.xpdustry.claj.client;
 import arc.ApplicationListener;
 import arc.Core;
 import arc.Events;
+import arc.util.Reflect;
 import arc.util.Time;
 
 import mindustry.Vars;
 import mindustry.game.EventType;
 import mindustry.gen.KickCallPacket2;
-import mindustry.io.JsonIO;
 import mindustry.mod.Mod;
 import mindustry.mod.Mods;
-import mindustry.net.Net;
 import mindustry.net.Packets.KickReason;
 
 import com.xpdustry.claj.api.Claj;
 
 
 public class Main extends Mod {
-  private static MindustryClajProvider provider;
   private static Mods.ModMeta meta;
+  private static MindustryClajProvider provider;
+  private static ClajNetProvider netProvider;
 
   /** @return the mod meta, using this class. */
   public static Mods.ModMeta getMeta() {
@@ -52,11 +52,15 @@ public class Main extends Mod {
     return provider;
   }
 
+  public static ClajNetProvider getNetProvider() {
+    return netProvider;
+  }
+
   @Override
   public void init() {
+    if (provider != null) return;
     provider = new MindustryClajProvider();
     Claj.init(provider);
-    ClajUpdater.schedule();
     initEvents();
     initBroadcastHook();
     ClajUi.init();
@@ -99,9 +103,12 @@ public class Main extends Mod {
   }
 
   public void initBroadcastHook() {
-    if (Vars.net.getClass() != Net.class) return; // Replaced by another mod or us
-    Net hook = new MindustryNet();
-    JsonIO.json.copyFields(Vars.net, hook, true);
-    Vars.net = hook;
+    if (netProvider != null) return;
+    netProvider = new ClajNetProvider(
+      Reflect.get(Vars.net, "provider"),
+      MindustryClajProvider.mindustryClient,
+      MindustryClajProvider.mindustryServer
+    );
+    Reflect.set(Vars.net, "provider", netProvider);
   }
 }

@@ -55,7 +55,7 @@ public abstract class ProxyClient extends Client {
   protected final IntMap<VirtualConnection> connectionsMap = new IntMap<>(16);
   protected final Seq<VirtualConnection> connections = new Seq<>(false);
   /** Used by {@link #close(VirtualConnection, DcReason)} to thread-safely remove a connection. */
-  private VirtualConnection[] stales = null;
+  private volatile VirtualConnection[] stales = null;
 
   protected NetListener conListener;
   protected volatile boolean shutdown = true, starting, connecting, closing;
@@ -249,22 +249,31 @@ public abstract class ProxyClient extends Client {
     return connectionsMap.get(id);
   }
 
-  protected Seq<VirtualConnection> getInternalConnections() {
-    return connections;
+  /** @return whether the connection is from this proxy. */
+  public boolean hasConnection(Connection con) {
+    return con != null && connectionsMap.get(con.getID()) == con;
   }
 
   public Iterable<VirtualConnection> getConnections() {
     return connections;
   }
 
+  public int getConnectionsSize() {
+    return connections.size;
+  }
+
   public void eachConnections(Cons<VirtualConnection> consumer) {
     connections.each(consumer);
   }
+
 
   /**
    * Send an object to every clients connected to the room. <br>
    * This is an optimization method to avoid the host from sending the same packet to every virtual clients,
    * as the server will do it to the real ones instead. So, using this will save bandwidth.
+   * <p>
+   * If {@link #broadcastSupported} is {@code false},
+   * this is equivalent of calling {@link #send()} for each connections.
    */
   public int broadcast(Object object, boolean tcp) {
     if (object == null) throw new IllegalArgumentException("object cannot be null.");
@@ -329,7 +338,7 @@ public abstract class ProxyClient extends Client {
     VirtualConnection con = getConnection(conId);
     if (con == null) {
       clearStales(); // Clear stale connections now to avoid a duplicate
-      con = new VirtualConnection(this, conId, addressHash);
+      con = new VirtualConnection(this, getSerialization(), conId, addressHash);
       if (conListener != null) con.addListener(conListener);
       addConnection(con);
     }

@@ -19,15 +19,12 @@
 
 package com.xpdustry.claj.client;
 
-import java.lang.reflect.Field;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 import arc.Core;
 import arc.net.Connection;
 import arc.net.DcReason;
-import arc.util.Structs;
-
 import mindustry.Vars;
 import mindustry.net.*;
 import mindustry.net.Packets.KickReason;
@@ -38,36 +35,10 @@ import com.xpdustry.claj.api.net.VirtualConnection;
 
 
 public class MindustryClajProxy extends ClajProxy {
-  //TODO: still useful?
-/*
-  /** No-op rate-keeper to prevent the local mindustry server from life blacklisting the claj server. *\/
-  private static final Ratekeeper noopRate = new Ratekeeper() {
-    @Override
-    public boolean allow(long spacing, int cap) {
-      return true;
-    }
-  };
-*/
-
-
-
   public MindustryClajProxy(ClajProvider provider) {
     super(provider);
-
     // Try to fix some issues with entities not loading when receiving world
     forceTcp = true;
-
-
-/* Deprecated, i think...
-    // Modify listener to set the noop rate
-    receiver.handle(ConnectionJoinPacket.class, p -> {
-      NetConnection net = toMindustryConnection(getConnection(p.conID));
-      if (net == null) return;
-      // Change the packet rate and chat rate to a no-op version to avoid a potential life blacklisting
-      net.packetRate = noopRate;
-      net.chatRate = noopRate;
-    });
-*/
   }
 
   public static boolean isMindustryConnection(Connection con) {
@@ -78,36 +49,22 @@ public class MindustryClajProxy extends ClajProxy {
     return con != null && con.getArbitraryData() instanceof NetConnection nc ? nc : null;
   }
 
-  static final Field connectionField;
-  static {
-    Field f = null;
-    try {
-      Class<?> clazz = Structs.find(ArcNetProvider.class.getDeclaredClasses(),
-                                    c -> "ArcConnection".equals(c.getSimpleName()));
-      if (clazz != null) f = clazz.getDeclaredField("connection");
-    } catch (Exception _) {}
-    connectionField = f;
-  }
-
-  /** Really difficult to convert as ArcConnection is package-private. Reflection is used. */
   public static VirtualConnection toVirtualConnection(NetConnection con) {
-    if (connectionField == null) return null;
-    try { return connectionField.get(con) instanceof VirtualConnection vcon ? vcon : null; }
-    catch (Exception e) { return null; }
+    return con instanceof ArcNetProvider.ArcConnection acon &&
+           acon.connection instanceof VirtualConnection vcon ? vcon : null;
   }
 
   public Iterable<NetConnection> getMindustryConnections() {
     return () -> new Iterator<>() {
+      final Iterator<VirtualConnection> it = getConnections().iterator();
       NetConnection next;
-      int index;
 
       @Override
       public boolean hasNext() {
         if (next != null) return true;
-        while (index < getInternalConnections().size) {
-          next = toMindustryConnection(getInternalConnections().get(index));
+        while (it.hasNext()) {
+          next = toMindustryConnection(it.next());
           if (next != null) return true;
-          index++;
         }
         return false;
       }
@@ -123,20 +80,21 @@ public class MindustryClajProxy extends ClajProxy {
   }
 
   public int getMindustryConnectionsSize() {
-    return getInternalConnections().count(MindustryClajProxy::isMindustryConnection);
+    int total = 0;
+    for (VirtualConnection t : getConnections()) {
+      if (isMindustryConnection(t)) total++;
+    }
+    return total;
   }
 
-  /**
-   * We cannot easily convert to VirtualConnection as ArcConnection is package-private.
-   * So we'll need to use the reverse path
-   */
+  /** @return the associated virtual connection from this proxy only. */
   public VirtualConnection getConnection(NetConnection con) {
-    //VirtualConnection vcon = toVirtualConnection(con);
-    //return vcon != null && getConnection(vcon.getID()) == vcon ? vcon : null;
-    return getInternalConnections().find(c -> {
-      NetConnection nc = toMindustryConnection(c);
-      return nc != null && nc == con;
-    });
+    VirtualConnection vcon = toVirtualConnection(con);
+    return hasConnection(vcon) ? vcon : null;
+  }
+
+  public boolean hasConnection(NetConnection con) {
+    return hasConnection(toVirtualConnection(con));
   }
 
   public void kickAllConnections(KickReason reason) {

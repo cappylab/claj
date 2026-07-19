@@ -8,9 +8,8 @@ Reworked CLaJ protocol of the xzxADIxzx's Scheme Size mod.
 
 CLaJ (Copy Link and Join) allows you to play with your friends, just by creating a room, copying the link and sending it to your friends.
 '''
-version: "2.4.1"
-minGameVersion: "146"
-legacyCompatible: true // Be compatible with v7 and v8
+version: "2.4.2"
+minGameVersion: "159.5"
 java: true
 hidden: true
 repo: xpdustry/claj

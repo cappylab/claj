@@ -78,7 +78,7 @@ public class CreateRoomDialog extends BaseDialog {
     shown(() -> Time.run(7f, this::refreshAll)); // Gives time to this dialog to display
 
     cont.top();
-    cont.pane(inner -> {
+    Cell<?> p = cont.pane(inner -> {
       inner.table(hosts -> {
         // Description
         hosts.table(table -> {
@@ -107,6 +107,12 @@ public class CreateRoomDialog extends BaseDialog {
       s.setScrollingDisabled(true, false);
     });
 
+    if (Vars.mobile) onResize(() -> {
+      p.width(Core.graphics.isPortrait() ? 480f : 800f);
+      customSection.layout();
+      onlineSection.layout();
+    });
+
     // Add the 'Manage CLaJ room' button in pause menu
     addButton();
   }
@@ -119,8 +125,8 @@ public class CreateRoomDialog extends BaseDialog {
       Seq<Cell> buttons = root.getCells();
 
       if (Vars.mobile) {
-        root.buttonRow("@claj.manage.name", Icon.planet, this::show)
-            .disabled(_ -> !Vars.net.server()).row();
+        root.buttonRow("@claj.manage.name", Icon.planet, this::show).disabled(_ -> !Vars.net.server());
+        if(root.getCells().size % root.getColumns() == 0) root.row();
         return;
 
       // Makes it compatible with foo's client by checking the hosting button.
@@ -132,8 +138,7 @@ public class CreateRoomDialog extends BaseDialog {
 
       // Probably the foo's client, use a normal button
       else
-        root.button("@claj.manage.name", Icon.planet, this::show)
-            .disabled(_ -> !Vars.net.server()).row();
+        root.button("@claj.manage.name", Icon.planet, this::show).disabled(_ -> !Vars.net.server()).row();
 
       // move the claj button above the quit button
       buttons.swap(buttons.size-1, buttons.size-2);
@@ -251,7 +256,7 @@ public class CreateRoomDialog extends BaseDialog {
       b.stack(new Table(label -> {
         label.center();
         // Cut in two line for mobiles or if the name is too long
-        if (Vars.mobile || (server.name + " (" + server.last + ')').length() > 54) {
+        if ((Vars.mobile && Core.graphics.isPortrait()) || (server.name + " (" + server.last + ')').length() > 54) {
           label.add(server.name).pad(5, 5, 0, 5).expandX().row();
           label.add("[lightgray](" +server.last + ')').pad(5, 0, 5, 5).expandX();
         } else label.add(server.name + " [lightgray](" + server.last + ')').pad(5).expandX();
@@ -328,7 +333,7 @@ public class CreateRoomDialog extends BaseDialog {
     }
     if (server.compatible) dest.image(Icon.ok, Color.green).padRight(7).left();
     else dest.image(Icon.warning, Color.yellow).padBottom(3).left().get().scaleBy(-0.22f);
-    if (Vars.mobile) dest.row();
+    if (Vars.mobile && Core.graphics.isPortrait()) dest.row();
     dest.add(server.ping + "ms", Color.lightGray, 0.91f).left();
   }
 

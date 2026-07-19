@@ -62,7 +62,7 @@ public class ClajRoutines {
   public void clearRoomCache(ClajRoom room, boolean removeList) {
     cancelRoomInfoTask(room);
     if (room.type == null) return;
-    CachedRoomList c = listCache.getNull(room.type);
+    CachedRoomList c = listCache.get(room.type, (CachedRoomList)null);
     if (c == null) return;
     c.remove(room.id);
     if (!removeList) return;
@@ -166,12 +166,12 @@ public class ClajRoutines {
   }
 
   public void updateRoom(ClajRoom room, boolean stateChanged) {
-    CachedRoomList cache = listCache.getNull(room.type);
+    CachedRoomList cache = listCache.get(room.type, (CachedRoomList)null);
     if (cache != null) cache.set(room, stateChanged);
   }
 
   public boolean sendRoomList(ClajType type, boolean force) {
-    CachedRoomList cache = listCache.getNull(type);
+    CachedRoomList cache = listCache.get(type, (CachedRoomList)null);
     if (cache == null || !force && cache.updating()) return false;
     cache.send();
     return true;
