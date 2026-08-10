@@ -185,10 +185,8 @@ public class Plugins implements ApplicationListener {
   public void listFiles(String directory, Cons2<LoadedPlugin, Fi> cons) {
     eachEnabled(plugin -> {
       Fi file = plugin.root.child(directory);
-      if (file.exists()) {
-        for (Fi child : file.list())
-          cons.get(plugin, child);
-      }
+      if (!file.exists()) return;
+      for (Fi child : file.list()) cons.get(plugin, child);
     });
   }
 

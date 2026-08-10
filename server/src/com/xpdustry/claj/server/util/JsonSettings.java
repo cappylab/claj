@@ -273,9 +273,10 @@ public class JsonSettings implements Autosaver.Saveable {
       }
 
     } catch (Throwable e) {
-      // Rename the file, like that the user know the file causing issues, and we can load a backup, if possible, next time.
+      // Rename the file, like that the user know the file causing issues.
+      // And we will load a backup, if possible, next time.
       file.moveTo(file.parent().child(file.nameWithoutExtension() + "_corrupted-" + System.currentTimeMillis() +
-                                      file.extension()));
+                                      "." + file.extension()));
       throw new RuntimeException("Error writing file: " + file, e);
     }
   }
