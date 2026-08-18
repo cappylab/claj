@@ -1,5 +1,5 @@
 name: claj
-displayName: "CLaJ"
+displayName: CLaJ
 subtitle: "\u26A0 Incompatible with 'Scheme Size'"
 author: "ZetaMap, xzxADIxzx"
 main: com.xpdustry.claj.client.Main
@@ -8,8 +8,8 @@ Reworked CLaJ protocol of the xzxADIxzx's Scheme Size mod.
 
 CLaJ (Copy Link and Join) allows you to play with your friends, just by creating a room, copying the link and sending it to your friends.
 '''
-version: "2.4.2"
-minGameVersion: "159.5"
+version: 2.4.3
+minGameVersion: 159.5
 java: true
 hidden: true
 repo: xpdustry/claj

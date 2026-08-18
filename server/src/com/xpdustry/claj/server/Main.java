@@ -119,7 +119,7 @@ public class Main implements ApplicationListener {
     // Fallback to argument property
     String versionOverride = System.getProperty("Claj-Version");
     if (version == null && versionOverride == null) {
-      Log.err("The 'Claj-Version' property is missing in the jar manifest.");
+      Log.err("The '@' property is missing in the jar manifest.", "Claj-Version");
       return false;
     }
 
